@@ -13,7 +13,12 @@ class OCREngine:
         )
 
     def extract_text(self, image_path):
-        results = self.ocr.predict(image_path)
+        image_path = Path(image_path)
+
+        if not image_path.is_file():
+            raise FileNotFoundError(f"Image file not found: {image_path}")
+
+        results = self.ocr.predict(str(image_path))
 
         image_id = Path(image_path).stem
 
