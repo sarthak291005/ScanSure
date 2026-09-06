@@ -1,4 +1,13 @@
-ocr/venv/
+# Python
 __pycache__/
 *.pyc
+
+# Virtual environments
+venv/
+ocr/venv/
+
+# macOS
 .DS_Store
+
+# OCR generated output
+ocr/output/
