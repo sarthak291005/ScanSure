@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from paddleocr import PaddleOCR
@@ -32,5 +33,20 @@ class OCREngine:
 
         return {
             "image_id": image_id,
+            "ocr_engine": "PaddleOCR",
             "text_blocks": text_blocks
         }
+
+    def save_result(self, image_path, output_dir="output"):
+        result = self.extract_text(image_path)
+
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+
+        image_id = result["image_id"]
+        json_path = output_path / f"{image_id}_ocr.json"
+
+        with open(json_path, "w", encoding="utf-8") as file:
+            json.dump(result, file, indent=4)
+
+        return json_path

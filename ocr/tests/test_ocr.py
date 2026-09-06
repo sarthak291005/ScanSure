@@ -17,3 +17,8 @@ for block in ocr_result["text_blocks"]:
     print(f"Bounding Box: {block['bbox']}")
     print(f"Confidence: {block['confidence']}")
     print("-" * 50)
+
+
+json_path = ocr_engine.save_result(image_path)
+
+print(f"\nJSON saved to: {json_path}")
