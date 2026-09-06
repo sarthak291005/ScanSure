@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from paddleocr import PaddleOCR
 
 
@@ -11,6 +13,8 @@ class OCREngine:
 
     def extract_text(self, image_path):
         results = self.ocr.predict(image_path)
+
+        image_id = Path(image_path).stem
 
         text_blocks = []
 
@@ -26,4 +30,7 @@ class OCREngine:
                     "confidence": float(score)
                 })
 
-        return text_blocks
+        return {
+            "image_id": image_id,
+            "text_blocks": text_blocks
+        }
