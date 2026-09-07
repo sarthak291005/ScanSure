@@ -1,0 +1,2592 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ScanSure — AI Legal Metrology Compliance Scanner</title>
+  <!-- Tailwind CSS via CDN for 100% standalone browser support -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eff6ff',
+              100: '#dbeafe',
+              200: '#bfdbfe',
+              500: '#3b82f6',
+              600: '#2563eb',
+              700: '#1d4ed8',
+              800: '#1e40af',
+              900: '#1e3a8a',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    @keyframes scanRay {
+      0% { top: 2%; opacity: 0.9; }
+      50% { top: 96%; opacity: 1; }
+      100% { top: 2%; opacity: 0.9; }
+    }
+    .scan-line {
+      position: absolute;
+      left: 0;
+      width: 100%;
+      height: 3px;
+      background: linear-gradient(90deg, transparent, #38bdf8, #2563eb, #38bdf8, transparent);
+      box-shadow: 0 0 16px 3px rgba(56, 189, 248, 0.8);
+      animation: scanRay 2s ease-in-out infinite;
+    }
+    @media print {
+      body * { visibility: hidden; }
+      #printable-certificate, #printable-certificate * { visibility: visible; }
+      #printable-certificate { position: absolute; left: 0; top: 0; width: 100%; }
+      .no-print { display: none !important; }
+    }
+    @keyframes cameraScan {
+      0% { top: 4%; }
+      50% { top: 94%; }
+      100% { top: 4%; }
+    }
+    .camera-scan-line {
+      position: absolute;
+      left: 4%;
+      right: 4%;
+      height: 3px;
+      border-radius: 9999px;
+      background: linear-gradient(90deg, transparent, #22d3ee, #38bdf8, #22d3ee, transparent);
+      box-shadow: 0 0 14px 2px rgba(34, 211, 238, 0.85);
+      animation: cameraScan 1.8s ease-in-out infinite;
+    }
+    @keyframes captureFlash {
+      0% { opacity: 0.9; }
+      100% { opacity: 0; }
+    }
+    .capture-flash {
+      animation: captureFlash 0.45s ease-out forwards;
+    }
+    .ov-btn { font-size: 10px; font-weight: 700; padding: 4px 10px; border-radius: 8px; border: 1px solid #e2e8f0; color: #64748b; background: #fff; cursor: pointer; transition: all .15s; }
+    .ov-btn:hover { border-color: #93c5fd; color: #2563eb; }
+    .ov-active { background: #2563eb !important; border-color: #2563eb !important; color: #fff !important; }
+
+    /* ===== Interactive motion ===== */
+    @keyframes fadeUp { from { opacity:0; transform: translateY(10px); } to { opacity:1; transform: translateY(0); } }
+    @keyframes scaleIn { from { opacity:0; transform: scale(.96); } to { opacity:1; transform: scale(1); } }
+    @keyframes pop { 0%{transform:scale(1)} 45%{transform:scale(1.18)} 100%{transform:scale(1)} }
+    @keyframes pingSoft { 0%{transform:scale(1);opacity:.7} 80%,100%{transform:scale(2.4);opacity:0} }
+    @keyframes barGrow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+    @keyframes floatY { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-4px)} }
+    .fade-up { animation: fadeUp .45s cubic-bezier(.22,1,.36,1) both; }
+    .scale-in { animation: scaleIn .3s cubic-bezier(.22,1,.36,1) both; }
+    .pop { animation: pop .4s cubic-bezier(.22,1,.36,1); }
+    .bar-grow { transform-origin:left; animation: barGrow .9s cubic-bezier(.22,1,.36,1) both; }
+    .float-y { animation: floatY 3s ease-in-out infinite; }
+    .lift { transition: transform .22s cubic-bezier(.22,1,.36,1), box-shadow .22s cubic-bezier(.22,1,.36,1), border-color .22s; }
+    .lift:hover { transform: translateY(-3px); box-shadow: 0 12px 26px -10px rgba(15,23,42,.18); }
+    .pressable { transition: transform .12s ease, background-color .15s, border-color .15s; }
+    .pressable:active { transform: scale(.97); }
+    .ping-soft { position: relative; }
+    .ping-soft::before { content:""; position:absolute; inset:0; border-radius:9999px; background:currentColor; animation: pingSoft 1.8s cubic-bezier(0,0,.2,1) infinite; }
+    .stat-icon { transition: transform .3s; }
+    .group:hover .stat-icon { transform: scale(1.12) rotate(-3deg); }
+    .nav-item-anim { transition: all .18s ease; }
+    .nav-item-anim:hover { transform: translateX(3px); }
+    @media (prefers-reduced-motion: reduce){ *,*::before,*::after{ animation-duration:.01ms!important; transition-duration:.01ms!important; } }
+
+    button { transition: transform .1s ease, background-color .15s, border-color .15s, color .15s, box-shadow .2s; }
+    button:active:not(:disabled) { transform: scale(.97); }
+    a { transition: transform .15s ease, background-color .15s, border-color .15s, color .15s; }
+
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans antialiased min-h-screen">
+
+  <!-- ================= AUTH SCREEN ================= -->
+  <div id="auth-screen" class="min-h-screen flex flex-col justify-center items-center px-4 py-8 bg-slate-50">
+    <div class="w-full max-w-md">
+      <!-- Brand -->
+      <div class="text-center mb-8">
+        <div class="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-500/25 mb-4">
+          <svg class="w-8 h-8" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" d="m9 12 2 2 4-4"/>
+          </svg>
+        </div>
+        <h1 class="text-2xl font-bold tracking-tight text-slate-900">ScanSure</h1>
+        <p class="text-xs font-semibold uppercase tracking-wider text-blue-600 mt-1">
+          Automated Legal Metrology Compliance Verification
+        </p>
+      </div>
+
+      <!-- Card -->
+      <div class="bg-white rounded-2xl border border-slate-200/90 shadow-xl shadow-slate-900/5 p-7 sm:p-8">
+        <div class="mb-6">
+          <h2 id="auth-title" class="text-xl font-bold text-slate-900">Welcome back</h2>
+          <p id="auth-subtitle" class="text-sm text-slate-500 mt-1">Sign in to continue to your dashboard</p>
+        </div>
+
+        <!-- 1-Click Fast Access Banner -->
+        <div class="mb-5 bg-blue-50 border border-blue-200 rounded-xl p-3.5 flex items-start gap-3">
+          <svg class="w-5 h-5 text-blue-600 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+          </svg>
+          <div class="text-xs text-blue-900">
+            <span class="font-bold">Instant Browser Mode:</span> Works 100% locally or connects to your database.
+            <button onclick="quickLoginDemo()" class="block mt-1.5 font-bold text-blue-700 underline hover:text-blue-900">
+              ⚡ Click here for 1-Click Demo Login
+            </button>
+          </div>
+        </div>
+
+        <form id="auth-form" onsubmit="handleAuthSubmit(event)" class="space-y-4">
+          <div id="register-fields" class="hidden space-y-4">
+            <div>
+              <label class="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1.5">Full Name</label>
+              <input id="auth-name" type="text" placeholder="Aarav Sharma" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm focus:bg-white focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500">
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1.5">Company</label>
+                <input id="auth-company" type="text" placeholder="Balaji Foods" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm focus:bg-white focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500">
+              </div>
+              <div>
+                <label class="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1.5">Role</label>
+                <select id="auth-role" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm focus:bg-white focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500">
+                  <option value="Packer">Packer</option>
+                  <option value="Manufacturer">Manufacturer</option>
+                  <option value="Importer">Importer</option>
+                  <option value="Seller">Marketplace Seller</option>
+                  <option value="Inspector">Inspector</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1.5">Email Address</label>
+            <input id="auth-email" type="email" required value="demo@scansure.ai" placeholder="demo@scansure.ai" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm focus:bg-white focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500">
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1.5">Password</label>
+            <input id="auth-password" type="password" required value="demo1234" placeholder="••••••••" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm focus:bg-white focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500">
+          </div>
+
+          <button type="submit" id="auth-submit-btn" class="w-full py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm shadow-md shadow-blue-600/25 transition active:scale-[0.99]">
+            Sign In
+          </button>
+        </form>
+
+        <div class="mt-6 pt-5 border-t border-slate-100 text-center text-sm text-slate-500">
+          <span id="auth-toggle-prompt">Don't have an account?</span>
+          <button type="button" onclick="toggleAuthMode()" id="auth-toggle-btn" class="font-semibold text-blue-600 hover:text-blue-700 ml-1">
+            Sign up
+          </button>
+        </div>
+      </div>
+
+      <div class="mt-6 text-center text-xs text-slate-400">
+        Complies with Legal Metrology (Packaged Commodities) Rules, 2011 &amp; FSS Act 2006
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ================= MAIN APP SCREEN ================= -->
+  <div id="main-app" class="hidden min-h-screen flex">
+
+    <!-- DESKTOP SIDEBAR -->
+    <aside class="w-64 bg-slate-900 text-white flex flex-col shrink-0 no-print">
+      <!-- Header -->
+      <div class="p-6 flex items-center gap-3 border-b border-slate-800">
+        <div class="h-9 w-9 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-md shadow-blue-500/30">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" d="m9 12 2 2 4-4"/>
+          </svg>
+        </div>
+        <div>
+          <div class="font-bold text-sm tracking-tight text-white leading-none">ScanSure</div>
+          <div class="text-[11px] text-blue-400 font-medium mt-1">Legal Metrology</div>
+        </div>
+      </div>
+
+      <!-- Navigation Links -->
+      <nav class="flex-1 px-3 py-4 space-y-1">
+        <button onclick="navigateTab('dashboard')" id="nav-dashboard" class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-white bg-blue-600">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+          Dashboard
+        </button>
+
+        <button onclick="navigateTab('products')" id="nav-products" class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-800">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
+          Products Master
+        </button>
+
+        <button onclick="navigateTab('scanner')" id="nav-scanner" class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-800">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7V5a2 2 0 012-2h2m10 0h2a2 2 0 012 2v2m0 10v2a2 2 0 01-2 2h-2m-10 0H5a2 2 0 01-2-2v-2m0-6h18"/></svg>
+          Label Scanner
+        </button>
+
+        <button onclick="navigateTab('reports')" id="nav-reports" class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-800">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+          Inspection Reports
+        </button>
+
+        <button onclick="navigateTab('rules')" id="nav-rules" class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-800">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
+          Compliance Rules
+        </button>
+      </nav>
+
+      <!-- Badge info -->
+      <div class="mx-3 mb-4 rounded-xl bg-slate-800/80 p-3.5 border border-slate-700/50">
+        <div class="flex items-center gap-2 text-xs font-semibold text-blue-400">
+          <span class="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          LM Rules Engine v2.4
+        </div>
+        <p class="text-[11px] text-slate-400 mt-1 leading-relaxed">
+          Legal Metrology 2011 · FSSAI · MRP Rules 2021
+        </p>
+      </div>
+
+      <!-- User Profile & Logout -->
+      <div class="p-3 border-t border-slate-800">
+        <div class="flex items-center justify-between p-2 rounded-xl bg-slate-800/50">
+          <div class="flex items-center gap-3 min-w-0">
+            <div id="user-avatar" class="h-9 w-9 rounded-full bg-blue-600 text-white font-bold text-xs flex items-center justify-center shrink-0">
+              DU
+            </div>
+            <div class="min-w-0 truncate">
+              <div id="user-display-name" class="text-xs font-semibold text-white truncate">Demo User</div>
+              <div id="user-display-company" class="text-[11px] text-slate-400 truncate">Balaji Foods</div>
+            </div>
+          </div>
+          <button onclick="handleLogout()" title="Sign Out" class="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-700">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- CONTENT AREA -->
+    <main class="flex-1 min-w-0 overflow-y-auto">
+
+      <!-- Top Nav Mobile Bar -->
+      <header class="bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between sm:hidden no-print">
+        <div class="flex items-center gap-2">
+          <div class="h-7 w-7 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold text-xs">
+            SS
+          </div>
+          <span class="font-bold text-sm text-slate-900">ScanSure</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <button onclick="quickSwitchMobileTab()" class="text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-slate-100 text-slate-700">
+            Menu
+          </button>
+          <button onclick="handleLogout()" class="text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-rose-50 text-rose-600">
+            Logout
+          </button>
+        </div>
+      </header>
+
+      <!-- TAB 1: DASHBOARD -->
+      <section id="tab-dashboard" class="p-6 max-w-7xl mx-auto space-y-6">
+        <!-- Banner Header -->
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h1 class="text-2xl font-bold tracking-tight text-slate-900">Dashboard</h1>
+            <p class="text-sm text-slate-500 mt-1">Legal Metrology Packaged Commodities (LMPC) compliance overview</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button onclick="navigateTab('scanner')" class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold shadow-sm transition">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+              Scan a Label
+            </button>
+          </div>
+        </div>
+
+        <!-- 4 Metric Cards -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div class="group lift fade-up bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-start justify-between">
+            <div>
+              <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Catalogue SKUs</p>
+              <h3 id="stat-products-count" class="text-3xl font-extrabold text-slate-900 mt-1.5">5</h3>
+              <p class="text-xs text-slate-500 mt-1">Active verified products</p>
+            </div>
+            <div class="stat-icon p-2.5 rounded-xl bg-blue-50 text-blue-600">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
+            </div>
+          </div>
+
+          <div class="group lift fade-up bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-start justify-between" style="animation-delay:70ms">
+            <div>
+              <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Labels Scanned</p>
+              <h3 id="stat-scans-count" class="text-3xl font-extrabold text-slate-900 mt-1.5">6</h3>
+              <p class="text-xs text-emerald-600 font-medium mt-1">AI OCR Analyzed</p>
+            </div>
+            <div class="stat-icon p-2.5 rounded-xl bg-purple-50 text-purple-600">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7V5a2 2 0 012-2h2m10 0h2a2 2 0 012 2v2m0 10v2a2 2 0 01-2 2h-2m-10 0H5a2 2 0 01-2-2v-2m0-6h18"/></svg>
+            </div>
+          </div>
+
+          <div class="group lift fade-up bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-start justify-between" style="animation-delay:140ms">
+            <div>
+              <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Reports Issued</p>
+              <h3 id="stat-reports-count" class="text-3xl font-extrabold text-slate-900 mt-1.5">5</h3>
+              <p class="text-xs text-slate-500 mt-1">Ready for marketplace</p>
+            </div>
+            <div class="stat-icon p-2.5 rounded-xl bg-amber-50 text-amber-600">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+            </div>
+          </div>
+
+          <div class="group lift fade-up bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-start justify-between" style="animation-delay:210ms">
+            <div>
+              <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Compliance Index</p>
+              <h3 id="stat-avg-score" class="text-3xl font-extrabold text-emerald-600 mt-1.5">94%</h3>
+              <p class="text-xs text-slate-500 mt-1">Rule adherence score</p>
+            </div>
+            <div class="stat-icon p-2.5 rounded-xl bg-emerald-50 text-emerald-600">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            </div>
+          </div>
+        </div>
+
+        <!-- Recent Inspections & Breakdown -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div class="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="font-bold text-slate-900 text-base">Recent Inspection Audits</h3>
+              <button onclick="navigateTab('reports')" class="text-xs font-semibold text-blue-600 hover:text-blue-700">View All &rarr;</button>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="w-full text-left text-sm">
+                <thead>
+                  <tr class="text-xs font-semibold uppercase text-slate-400 border-b border-slate-100">
+                    <th class="pb-3">Product Name</th>
+                    <th class="pb-3">Verdict</th>
+                    <th class="pb-3">Score</th>
+                    <th class="pb-3">Date</th>
+                    <th class="pb-3 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody id="dashboard-recent-reports" class="divide-y divide-slate-100">
+                  <!-- Injected via JS -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm flex flex-col justify-between">
+            <div>
+              <h3 class="font-bold text-slate-900 text-base mb-1">Legal Metrology Breakdown</h3>
+              <p class="text-xs text-slate-500 mb-5">Statutory compliance across 10 mandatory rules</p>
+              
+              <div class="space-y-4">
+                <div>
+                  <div class="flex justify-between text-xs font-medium mb-1">
+                    <span class="text-slate-700">Fully Compliant</span>
+                    <span class="text-emerald-600 font-bold" id="dash-pct-pass">75%</span>
+                  </div>
+                  <div class="h-2 rounded-full bg-slate-100 overflow-hidden">
+                    <div id="dash-bar-pass" class="h-full bg-emerald-500 rounded-full" style="width: 75%"></div>
+                  </div>
+                </div>
+
+                <div>
+                  <div class="flex justify-between text-xs font-medium mb-1">
+                    <span class="text-slate-700">Warnings / Recommendations</span>
+                    <span class="text-amber-600 font-bold" id="dash-pct-warn">15%</span>
+                  </div>
+                  <div class="h-2 rounded-full bg-slate-100 overflow-hidden">
+                    <div id="dash-bar-warn" class="h-full bg-amber-500 rounded-full" style="width: 15%"></div>
+                  </div>
+                </div>
+
+                <div>
+                  <div class="flex justify-between text-xs font-medium mb-1">
+                    <span class="text-slate-700">Critical Violations</span>
+                    <span class="text-rose-600 font-bold" id="dash-pct-fail">10%</span>
+                  </div>
+                  <div class="h-2 rounded-full bg-slate-100 overflow-hidden">
+                    <div id="dash-bar-fail" class="h-full bg-rose-500 rounded-full" style="width: 10%"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="mt-6 pt-5 border-t border-slate-100 bg-slate-50 rounded-xl p-3.5 text-xs text-slate-600 leading-relaxed">
+              <span class="font-bold text-slate-800">Rule Notice:</span> All packaged commodities on Amazon, Flipkart, Blinkit &amp; Zepto must display Net Quantity, MRP, Mfg Date, and Country of Origin.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 2: PRODUCTS MASTER (CRUD) -->
+      <section id="tab-products" class="hidden p-6 max-w-7xl mx-auto space-y-6">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h1 class="text-2xl font-bold tracking-tight text-slate-900">Products Master</h1>
+            <p class="text-sm text-slate-500 mt-1">Manage declared product specifications checked against label scans</p>
+          </div>
+          <button onclick="openProductModal()" class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold shadow-sm transition">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+            Add New Product
+          </button>
+        </div>
+
+        <!-- Filter bar -->
+        <div class="flex flex-col sm:flex-row gap-3">
+          <input id="product-search-input" oninput="renderProducts()" type="text" placeholder="Search product name, manufacturer or HSN..." class="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500">
+          <select id="product-category-filter" onchange="renderProducts()" class="px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500">
+            <option value="all">All Categories</option>
+            <option value="food">Food &amp; Spices</option>
+            <option value="dairy">Dairy</option>
+            <option value="beverages">Beverages</option>
+            <option value="bakery">Bakery</option>
+          </select>
+        </div>
+
+        <!-- Products Grid -->
+        <div id="products-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          <!-- Rendered via JS -->
+        </div>
+      </section>
+
+      <!-- TAB 3: LABEL SCANNER — 8-STAGE AI PIPELINE -->
+      <section id="tab-scanner" class="hidden p-4 sm:p-6 max-w-[1440px] mx-auto space-y-5">
+        <!-- Header + Stepper -->
+        <div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <h1 class="text-xl font-bold tracking-tight text-slate-900">AI Label Scanner</h1>
+              <p class="text-xs text-slate-500 mt-0.5">8-stage pipeline · live OCR bounding boxes · forensic evidence · inspector verification</p>
+            </div>
+            <span id="step-counter" class="shrink-0 text-xs font-bold text-blue-700 bg-blue-50 border border-blue-100 px-3 py-1.5 rounded-full">Step 1 of 8</span>
+          </div>
+          <div id="stepper-track" class="mt-4 flex items-center gap-1 overflow-x-auto pb-1"></div>
+        </div>
+
+        <div class="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
+          <!-- LEFT: OCR CANVAS + HISTORY -->
+          <div class="xl:col-span-7 space-y-4">
+            <div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+              <div class="flex items-center justify-between mb-3 gap-2">
+                <span class="text-[11px] font-bold uppercase tracking-wider text-slate-700">Label Canvas · Bounding Box View</span>
+                <div class="flex items-center gap-2">
+                  <div id="side-toggle" class="hidden overflow-hidden rounded-lg border border-slate-200 text-[11px] font-bold">
+                    <button id="side-front" onclick="setCanvasSide('front')" class="px-2.5 py-1 bg-slate-900 text-white transition-colors">Front</button>
+                    <button id="side-back" onclick="setCanvasSide('back')" class="px-2.5 py-1 bg-white text-slate-500 hover:bg-slate-50 transition-colors">Back</button>
+                  </div>
+                  <span id="zoom-chip" class="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded-full">1.0×</span>
+                </div>
+              </div>
+              <div id="scan-canvas" class="relative overflow-hidden rounded-xl bg-slate-950 select-none" style="aspect-ratio: 4/3;">
+                <div id="zoom-layer" class="absolute inset-0" style="transition: transform .5s cubic-bezier(.22,1,.36,1), transform-origin .5s cubic-bezier(.22,1,.36,1);">
+                  <img id="scan-img" src="/images/label-1.jpg" alt="Label" class="absolute inset-0 h-full w-full object-cover" draggable="false">
+                  <div id="boxes-layer" class="absolute inset-0"></div>
+                </div>
+                <div id="scan-scanline" class="scan-line hidden"></div>
+                <div class="absolute top-2 left-2 bg-slate-950/85 backdrop-blur px-2.5 py-1 rounded-lg font-mono text-[10px] text-cyan-200" id="mode-chip">MODE: UPLOAD</div>
+              </div>
+              <div class="mt-3 flex flex-wrap items-center gap-2">
+                <button onclick="canvasZoom(0.8)" class="w-8 h-8 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold">−</button>
+                <button onclick="canvasZoom(1.25)" class="w-8 h-8 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold">+</button>
+                <button onclick="canvasZoomReset()" class="px-3 h-8 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50">Reset view</button>
+                <label class="ml-auto flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer">
+                  <input type="checkbox" id="labels-toggle" checked onchange="renderBoxes(currentBoxMode())" class="rounded text-blue-600"> Show box labels
+                </label>
+              </div>
+              <div class="mt-3 flex flex-wrap gap-3 text-[10px] font-semibold text-slate-500">
+                <span class="flex items-center gap-1"><span class="h-2.5 w-2.5 rounded-sm border-2 border-emerald-400 bg-emerald-400/20"></span>Pass</span>
+                <span class="flex items-center gap-1"><span class="h-2.5 w-2.5 rounded-sm border-2 border-amber-400 bg-amber-400/20"></span>Warning</span>
+                <span class="flex items-center gap-1"><span class="h-2.5 w-2.5 rounded-sm border-2 border-rose-500 bg-rose-500/20"></span>Fail</span>
+                <span class="flex items-center gap-1"><span class="h-2.5 w-2.5 rounded-sm border-2 border-dashed border-slate-400"></span>Not applicable</span>
+                <span class="flex items-center gap-1"><span class="h-2.5 w-2.5 rounded-sm border-2 border-dashed border-rose-500"></span>Not found</span>
+              </div>
+            </div>
+
+            <!-- SCAN HISTORY -->
+            <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+              <div class="flex items-center justify-between mb-3">
+                <h3 class="text-sm font-bold text-slate-900">Scan History</h3>
+                <span id="history-count" class="text-[10px] font-bold bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">0</span>
+              </div>
+              <div id="scan-history-list" class="space-y-2"></div>
+            </div>
+          </div>
+
+          <!-- RIGHT: STAGE PANEL -->
+          <div class="xl:col-span-5">
+            <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              <div class="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between gap-2">
+                <h3 id="stage-title" class="text-sm font-bold text-slate-900">1 · Upload / Capture</h3>
+                <span id="stage-hint" class="text-[10px] font-bold text-slate-400">SELECT &amp; CAPTURE</span>
+              </div>
+              <div class="p-5">
+
+                <!-- STAGE 1: UPLOAD / CAPTURE -->
+                <div id="sp-upload" class="space-y-4">
+                  <div>
+                    <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Master product</label>
+                    <select id="scanner-product-select" onchange="selectScannerProduct()" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm font-medium focus:bg-white focus:outline-none focus:border-blue-500"></select>
+                    <div id="scan-product-info" class="mt-2 p-2.5 rounded-lg bg-blue-50 border border-blue-100 text-[11px] text-blue-900 leading-relaxed"></div>
+                  </div>
+                  <div>
+                    <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Label source</label>
+                    <div class="grid grid-cols-3 gap-2">
+                      <button type="button" onclick="setPresetScanImage('/images/label-1.jpg','Almonds 500g')" class="p-2 text-[11px] font-semibold rounded-lg border border-slate-200 hover:border-blue-500 hover:bg-blue-50 text-slate-700">Almonds 500g</button>
+                      <button type="button" onclick="setPresetScanImage('/images/label-2.jpg','Basmati 1kg')" class="p-2 text-[11px] font-semibold rounded-lg border border-slate-200 hover:border-blue-500 hover:bg-blue-50 text-slate-700">Basmati 1kg</button>
+                      <button type="button" onclick="setPresetScanImage('/images/label-3.jpg','Milk 2L')" class="p-2 text-[11px] font-semibold rounded-lg border border-slate-200 hover:border-blue-500 hover:bg-blue-50 text-slate-700">Milk 2L</button>
+                    </div>
+                    <label class="block cursor-pointer mt-2">
+                      <span class="text-[11px] font-medium text-slate-500">Upload label photo (JPG/PNG):</span>
+                      <input type="file" accept="image/*" onchange="handleCustomFileUpload(event)" class="text-[11px] text-slate-500 file:ml-2 file:px-2.5 file:py-1 file:rounded-md file:border-0 file:text-[11px] file:font-bold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
+                    </label>
+                    <!-- Image preview after upload -->
+                    <div id="upload-preview" class="hidden mt-2 overflow-hidden rounded-xl border border-slate-200">
+                      <div class="relative bg-slate-950">
+                        <img id="upload-preview-img" src="" alt="Label preview" class="max-h-48 w-full object-contain">
+                        <span class="absolute left-2 top-2 flex items-center gap-1 rounded-full bg-emerald-500/90 px-2 py-0.5 text-[10px] font-bold text-white shadow">
+                          &#10003; Preview ready
+                        </span>
+                      </div>
+                      <div class="flex items-center justify-between gap-2 border-t border-slate-100 bg-white px-3 py-2">
+                        <div class="min-w-0">
+                          <div id="upload-preview-name" class="truncate text-xs font-semibold text-slate-800">label-image.jpg</div>
+                          <div id="upload-preview-size" class="text-[10px] text-slate-400"></div>
+                        </div>
+                        <div class="flex shrink-0 items-center gap-1.5">
+                          <button onclick="document.querySelector('#sp-upload input[type=file]').click()" class="pressable rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50">Replace</button>
+                          <button onclick="clearUploadPreview()" class="pressable rounded-lg px-2.5 py-1 text-[11px] font-semibold text-rose-600 hover:bg-rose-50">Remove</button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Optional back panel -->
+                    <div class="mt-2 rounded-xl border border-dashed border-slate-200 bg-slate-50/60 p-3">
+                      <div class="flex items-center justify-between gap-2">
+                        <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Back side <span class="normal-case font-medium text-slate-400">(optional)</span></span>
+                        <button id="back-remove-btn" onclick="clearBackImage()" class="hidden pressable text-[11px] font-semibold text-rose-600 hover:underline">Remove</button>
+                      </div>
+                      <p class="mt-1 text-[11px] leading-relaxed text-slate-500">A single front <em>or</em> back image verifies all 10 rules. Add the back panel to merge both sides for complete coverage.</p>
+                      <div class="mt-2 flex items-center gap-3">
+                        <div id="back-thumb" class="hidden items-center gap-2 overflow-hidden rounded-lg border border-slate-200 bg-white">
+                          <img id="back-thumb-img" src="" alt="Back panel" class="h-12 w-12 object-cover">
+                        </div>
+                        <button onclick="document.getElementById('back-file-input').click()" class="pressable flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:border-blue-400 hover:text-blue-700">
+                          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                          Add back panel
+                        </button>
+                      </div>
+                      <input type="file" id="back-file-input" accept="image/*" onchange="handleBackFileUpload(event)" class="hidden">
+                    </div>
+                  </div>
+                  <!-- Live camera (compact) -->
+                  <div class="rounded-xl border border-slate-200 p-3 space-y-2">
+                    <div class="flex items-center justify-between">
+                      <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                        <svg class="w-3.5 h-3.5 text-rose-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                        Live camera
+                      </span>
+                      <div class="flex items-center gap-2">
+                        <span id="camera-rec-badge" class="hidden items-center gap-1 px-1.5 py-0.5 rounded-full bg-rose-50 text-rose-600 text-[10px] font-bold"><span class="h-1.5 w-1.5 rounded-full bg-rose-500 animate-pulse"></span>LIVE</span>
+                        <button type="button" id="camera-toggle-btn" onclick="toggleLiveCamera()" class="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-700 text-white text-[11px] font-bold"><span id="camera-toggle-label">Start Camera</span></button>
+                      </div>
+                    </div>
+                    <div id="camera-container" class="relative w-full h-40 bg-slate-950 rounded-lg overflow-hidden hidden">
+                      <video id="camera-video" autoplay playsinline muted class="h-full w-full object-cover"></video>
+                      <div class="camera-scan-line"></div>
+                      <div id="camera-status-chip" class="absolute top-1.5 left-1.5 bg-slate-950/85 backdrop-blur px-2 py-0.5 rounded font-mono text-[10px] text-cyan-200"><span id="camera-status-text">Align label inside frame…</span></div>
+                      <div id="camera-flash" class="absolute inset-0 bg-white pointer-events-none opacity-0"></div>
+                    </div>
+                    <div id="camera-error" class="hidden text-[11px] text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-2.5"><strong>Camera unavailable:</strong> <span id="camera-error-msg">permission denied.</span> Use photo upload instead.</div>
+                    <div id="camera-controls" class="hidden">
+                      <button type="button" onclick="captureCameraFrame()" class="w-full py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold flex items-center justify-center gap-1.5">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                        Capture Label Frame
+                      </button>
+                      <div id="capture-note" class="hidden mt-1.5 text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5 font-semibold">&#10003; Frame captured — set as label image.</div>
+                    </div>
+                  </div>
+                  <!-- Defect simulation -->
+                  <div class="rounded-xl bg-slate-50 border border-slate-200 p-3 space-y-1.5">
+                    <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Advanced · Defect simulation</span>
+                    <label class="flex items-center gap-2 text-[11px] text-slate-600 cursor-pointer"><input id="sim-omit-address" type="checkbox" class="rounded text-blue-600"> Omit address (fails LM-003)</label>
+                    <label class="flex items-center gap-2 text-[11px] text-slate-600 cursor-pointer"><input id="sim-future-date" type="checkbox" class="rounded text-blue-600"> Future mfg date (fails LM-010)</label>
+                    <label class="flex items-center gap-2 text-[11px] text-slate-600 cursor-pointer"><input id="sim-low-confidence" type="checkbox" class="rounded text-blue-600"> Low OCR confidence (needs review)</label>
+                  </div>
+                  <button onclick="setScanStage('preview')" class="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold shadow-sm">Continue to Preview &rarr;</button>
+                </div>
+
+                <!-- STAGE 2: IMAGE PREVIEW -->
+                <div id="sp-preview" class="hidden space-y-4">
+                  <div class="p-3 rounded-xl bg-slate-50 border border-slate-100 text-xs text-slate-600 space-y-1.5">
+                    <div class="flex justify-between gap-2"><span class="text-slate-400">Product</span><span id="pv-product" class="font-bold text-slate-800 text-right truncate"></span></div>
+                    <div class="flex justify-between gap-2"><span class="text-slate-400">Declared net qty</span><span id="pv-qty" class="font-bold text-slate-800"></span></div>
+                    <div class="flex justify-between gap-2"><span class="text-slate-400">MRP</span><span id="pv-mrp" class="font-bold text-slate-800"></span></div>
+                    <div class="flex justify-between gap-2"><span class="text-slate-400">Manufacturer</span><span id="pv-mfg" class="font-bold text-slate-800 text-right truncate"></span></div>
+                  </div>
+                  <div class="text-[11px] text-slate-500 leading-relaxed bg-blue-50 border border-blue-100 rounded-xl p-3">
+                    The canvas shows your label. On scan, the AI will overlay <strong>bounding boxes</strong> around every detected statutory declaration, then evaluate 10 Legal Metrology rules.
+                  </div>
+                  <div class="flex gap-2">
+                    <button onclick="setScanStage('upload')" class="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-xs font-bold hover:bg-slate-50">&larr; Back</button>
+                    <button onclick="beginProcessing()" class="flex-[2] py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold shadow-sm">&#9654; Start AI Scan</button>
+                  </div>
+                </div>
+
+                <!-- STAGE 3: PROCESSING -->
+                <div id="sp-processing" class="hidden space-y-4">
+                  <div class="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
+                    <div id="scan-progress-bar" class="bg-blue-600 h-full rounded-full transition-all duration-300" style="width:5%"></div>
+                  </div>
+                  <p id="scan-stage-label" class="text-xs font-semibold text-slate-600 text-center">Initializing pipeline…</p>
+                  <div id="scan-steps" class="space-y-2 text-[11px]"></div>
+                  <p class="text-[10px] text-slate-400 text-center">Bounding boxes appear on the canvas as each text region is detected…</p>
+                </div>
+
+                <!-- STAGE 4: EXTRACTED INFO -->
+                <div id="sp-extracted" class="hidden space-y-4">
+                  <div class="flex items-center justify-between text-xs">
+                    <span class="font-bold text-slate-700">Declarations extracted by OCR</span>
+                    <span class="font-bold text-emerald-600">avg conf <span id="extracted-avg">—</span></span>
+                  </div>
+                  <div id="extracted-table"></div>
+                  <div class="flex gap-2">
+                    <button onclick="setScanStage('preview')" class="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-xs font-bold hover:bg-slate-50">&larr; Back</button>
+                    <button onclick="setScanStage('evaluation')" class="flex-[2] py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold">Compliance Evaluation &rarr;</button>
+                  </div>
+                </div>
+
+                <!-- STAGE 5: COMPLIANCE EVALUATION -->
+                <div id="sp-evaluation" class="hidden space-y-4">
+                  <div id="eval-summary" class="rounded-xl border border-slate-200 p-4"></div>
+                  <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Rule checks · click to locate on canvas</div>
+                  <div id="eval-findings" class="space-y-1.5 max-h-60 overflow-y-auto pr-1"></div>
+                  <div class="flex gap-2">
+                    <button onclick="setScanStage('extracted')" class="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-xs font-bold hover:bg-slate-50">&larr; Back</button>
+                    <button onclick="setScanStage('evidence')" class="flex-[2] py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold">Open Evidence Viewer &rarr;</button>
+                  </div>
+                </div>
+
+                <!-- STAGE 6: EVIDENCE VIEWER -->
+                <div id="sp-evidence" class="hidden space-y-4">
+                  <p class="text-[11px] text-slate-500">Select any rule below <strong>or a box on the canvas</strong> — the view zooms to the exact OCR region with its forensic evidence.</p>
+                  <div id="evidence-select" class="space-y-1.5 max-h-40 overflow-y-auto pr-1"></div>
+                  <div id="evidence-detail" class="rounded-xl border border-slate-200 p-3.5 space-y-2"></div>
+                  <div class="flex gap-2">
+                    <button onclick="setScanStage('evaluation')" class="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-xs font-bold hover:bg-slate-50">&larr; Back</button>
+                    <button onclick="setScanStage('manual')" class="flex-[2] py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold">Manual Verification &rarr;</button>
+                  </div>
+                </div>
+
+                <!-- STAGE 7: MANUAL VERIFICATION -->
+                <div id="sp-manual" class="hidden space-y-4">
+                  <div class="text-[11px] text-slate-500">Inspector override — confirm AI findings, mark false positives, or dispute passes before the report is finalized.</div>
+                  <div id="manual-list" class="space-y-2.5 max-h-72 overflow-y-auto pr-1"></div>
+                  <div class="rounded-xl bg-slate-900 text-white px-4 py-3 flex items-center justify-between">
+                    <span class="text-[11px] font-bold uppercase tracking-wider text-slate-300">Final verdict preview</span>
+                    <span id="manual-verdict" class="text-xs font-bold"></span>
+                  </div>
+                  <div class="flex gap-2">
+                    <button onclick="setScanStage('evidence')" class="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-xs font-bold hover:bg-slate-50">&larr; Back</button>
+                    <button onclick="finalizeReport()" class="flex-[2] py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm">Finalize Report &#10003;</button>
+                  </div>
+                </div>
+
+                <!-- STAGE 8: FINAL REPORT -->
+                <div id="sp-report" class="hidden space-y-4">
+                  <div id="report-banner" class="rounded-xl p-4 text-center border"></div>
+                  <div id="report-meta" class="text-xs space-y-1.5"></div>
+                  <div id="report-overrides" class="text-xs"></div>
+                  <div class="grid grid-cols-1 gap-2">
+                    <button onclick="openReportModal(scanState.lastReportId)" class="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold">View Full Evidence Report &amp; Certificate</button>
+                    <button onclick="downloadFinalReport()" class="w-full py-2.5 rounded-xl border border-slate-200 text-slate-700 text-xs font-bold hover:bg-slate-50">Download Report (TXT)</button>
+                    <button onclick="newScan()" class="w-full py-2.5 rounded-xl border border-slate-200 text-slate-700 text-xs font-bold hover:bg-slate-50">+ New Scan</button>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 4: INSPECTION REPORTS -->
+      <section id="tab-reports" class="hidden p-6 max-w-7xl mx-auto space-y-6">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h1 class="text-2xl font-bold tracking-tight text-slate-900">Inspection Reports</h1>
+            <p class="text-sm text-slate-500 mt-1">Evidence-backed compliance certificates for e-commerce onboarding &amp; audits</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button onclick="navigateTab('scanner')" class="px-4 py-2 rounded-xl bg-blue-600 text-white font-semibold text-xs shadow-sm hover:bg-blue-700">
+              New Inspection
+            </button>
+          </div>
+        </div>
+
+        <!-- Filter tabs -->
+        <div class="flex items-center gap-2">
+          <button onclick="filterReports('all')" id="rf-all" class="report-filter-btn px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 text-white">All Reports</button>
+          <button onclick="filterReports('compliant')" id="rf-compliant" class="report-filter-btn px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200">Compliant</button>
+          <button onclick="filterReports('non_compliant')" id="rf-non_compliant" class="report-filter-btn px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200">Non-Compliant</button>
+          <button onclick="filterReports('needs_review')" id="rf-needs_review" class="report-filter-btn px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200">Needs Review</button>
+        </div>
+
+        <!-- Reports List -->
+        <div id="reports-list-container" class="space-y-3">
+          <!-- Populated via JS -->
+        </div>
+      </section>
+
+      <!-- TAB 5: COMPLIANCE RULES LIBRARY -->
+      <section id="tab-rules" class="hidden p-6 max-w-7xl mx-auto space-y-6">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h1 class="text-2xl font-bold tracking-tight text-slate-900">Compliance Rules Library</h1>
+            <p class="text-sm text-slate-500 mt-1">Legal Metrology (Packaged Commodities) Rules, 2011 &amp; FSSAI standards</p>
+          </div>
+          <button onclick="openAddRuleModal()" class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold shadow-sm transition">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+            Add Statutory Rule
+          </button>
+        </div>
+
+        <div id="rules-list-container" class="space-y-3">
+          <!-- Populated via JS -->
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+
+  <!-- ================= MODALS ================= -->
+
+  <!-- PRODUCT CREATE/EDIT MODAL -->
+  <div id="product-modal" class="hidden fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+      <div class="flex justify-between items-center mb-5 pb-3 border-b border-slate-100">
+        <h3 id="product-modal-title" class="font-bold text-lg text-slate-900">Add New Product</h3>
+        <button onclick="closeProductModal()" class="text-slate-400 hover:text-slate-600 p-1">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <form onsubmit="handleProductSave(event)" class="space-y-4 text-xs font-medium text-slate-700">
+        <input type="hidden" id="pm-id">
+
+        <div>
+          <label class="block mb-1 font-semibold uppercase tracking-wider">Product Name *</label>
+          <input type="text" id="pm-name" required placeholder="Roasted Almonds Premium" class="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20">
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block mb-1 font-semibold uppercase tracking-wider">Category *</label>
+            <select id="pm-category" class="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none">
+              <option value="food">Food &amp; Spices</option>
+              <option value="dairy">Dairy</option>
+              <option value="beverages">Beverages</option>
+              <option value="bakery">Bakery</option>
+              <option value="pharma">Pharma</option>
+            </select>
+          </div>
+          <div>
+            <label class="block mb-1 font-semibold uppercase tracking-wider">HSN Code</label>
+            <input type="text" id="pm-hsn" placeholder="0802" class="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-3 gap-3">
+          <div>
+            <label class="block mb-1 font-semibold uppercase tracking-wider">Declared Wt *</label>
+            <input type="text" id="pm-weight" required placeholder="500" class="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none">
+          </div>
+          <div>
+            <label class="block mb-1 font-semibold uppercase tracking-wider">Unit *</label>
+            <select id="pm-unit" class="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none">
+              <option value="g">g</option>
+              <option value="kg">kg</option>
+              <option value="L">L</option>
+              <option value="ml">ml</option>
+            </select>
+          </div>
+          <div>
+            <label class="block mb-1 font-semibold uppercase tracking-wider">Printed Qty *</label>
+            <input type="text" id="pm-net-qty" required placeholder="500 g" class="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block mb-1 font-semibold uppercase tracking-wider">MRP (in ₹, taxes incl)</label>
+            <input type="number" step="0.01" id="pm-mrp" placeholder="899.00" class="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none">
+          </div>
+          <div>
+            <label class="block mb-1 font-semibold uppercase tracking-wider">FSSAI / Mfg Lic</label>
+            <input type="text" id="pm-lic" placeholder="10023456789123" class="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none">
+          </div>
+        </div>
+
+        <div>
+          <label class="block mb-1 font-semibold uppercase tracking-wider">Manufacturer / Packer Name *</label>
+          <input type="text" id="pm-mfg-name" required placeholder="SpiceWala Foods Pvt Ltd" class="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none">
+        </div>
+
+        <div>
+          <label class="block mb-1 font-semibold uppercase tracking-wider">Complete Address (with PIN) *</label>
+          <textarea id="pm-address" required rows="2" placeholder="B-14, Okhla Industrial Area Phase II, New Delhi 110020" class="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none"></textarea>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block mb-1 font-semibold uppercase tracking-wider">Mfg Date *</label>
+            <input type="date" id="pm-mfg-date" required class="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none">
+          </div>
+          <div>
+            <label class="block mb-1 font-semibold uppercase tracking-wider">Best Before / Expiry</label>
+            <input type="date" id="pm-exp-date" class="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none">
+          </div>
+        </div>
+
+        <div class="pt-4 flex justify-end gap-3 border-t border-slate-100">
+          <button type="button" onclick="closeProductModal()" class="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 font-semibold text-xs">Cancel</button>
+          <button type="submit" class="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs shadow-sm">Save Product</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+
+  <!-- REPORT VIEWER & PRINTABLE MODAL -->
+  <div id="report-modal" class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl max-h-[92vh] overflow-y-auto">
+      <div class="flex justify-between items-center mb-4 pb-3 border-b border-slate-100 no-print">
+        <h3 class="font-bold text-lg text-slate-900">Legal Metrology Inspection Report</h3>
+        <div class="flex items-center gap-2">
+          <button onclick="window.print()" class="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-700 text-xs font-semibold hover:bg-slate-50 flex items-center gap-1.5">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
+            Print / Save PDF
+          </button>
+          <button onclick="downloadReportText()" class="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 flex items-center gap-1.5">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+            Download TXT
+          </button>
+          <button onclick="closeReportModal()" class="text-slate-400 hover:text-slate-600 p-1">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Printable Certificate Content -->
+      <div id="printable-certificate" class="space-y-5 text-slate-800">
+        <!-- Certificate Header -->
+        <div class="border-b-2 border-slate-900 pb-4 text-center">
+          <div class="flex items-center justify-center gap-2 mb-1">
+            <div class="h-6 w-6 rounded bg-blue-600 text-white flex items-center justify-center font-bold text-xs">SS</div>
+            <h2 class="font-extrabold text-lg text-slate-900 tracking-wider">SCANSURE VERIFICATION SYSTEM</h2>
+          </div>
+          <p class="text-xs uppercase tracking-widest text-slate-500 font-semibold">
+            Official Legal Metrology (Packaged Commodities) Compliance Certificate
+          </p>
+          <p class="text-[11px] text-slate-400 mt-0.5" id="cert-timestamp"></p>
+        </div>
+
+        <!-- Meta Grid -->
+        <div class="grid grid-cols-2 gap-3 text-xs bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+          <div><span class="text-slate-400">Certificate ID:</span> <span id="cert-id" class="font-mono font-bold text-slate-800"></span></div>
+          <div><span class="text-slate-400">Compliance Verdict:</span> <span id="cert-verdict" class="font-bold"></span></div>
+          <div><span class="text-slate-400">Inspected Product:</span> <span id="cert-product" class="font-bold text-slate-800"></span></div>
+          <div><span class="text-slate-400">Total Score:</span> <span id="cert-score" class="font-bold"></span></div>
+        </div>
+
+        <!-- Summary text -->
+        <div>
+          <h4 class="text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">Inspector Executive Summary</h4>
+          <p id="cert-summary" class="text-xs text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-200 leading-relaxed"></p>
+        </div>
+
+        <!-- Evidence findings -->
+        <div>
+          <h4 class="text-xs font-bold uppercase tracking-wider text-slate-700 mb-2">Rule Checks &amp; Forensic OCR Evidence</h4>
+          <div id="cert-findings" class="space-y-2 text-xs">
+            <!-- Injected via JS -->
+          </div>
+        </div>
+
+        <!-- Stamp / Sign-off -->
+        <div class="pt-4 border-t border-slate-200 flex items-center justify-between text-[11px] text-slate-500">
+          <div>
+            Verified under: Rule 4 &amp; 6, Legal Metrology Rules 2011<br>
+            Certificate Hash: <span id="cert-hash" class="font-mono text-slate-700 font-semibold"></span>
+          </div>
+          <div class="text-right">
+            <div class="font-serif italic font-bold text-blue-900 text-sm">Digitally Endorsed</div>
+            <div>Automated LMPC Compliance Engine</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ================= JAVASCRIPT APP LOGIC ================= -->
+  <script>
+    // ---------- INITIAL DATA STORE ----------
+    const DEFAULT_RULES = [
+      { code: "LM-001", title: "Net Quantity Declared Clearly", description: "The net quantity must be declared in the format 'Net Wt: X [unit]' and legibly visible on the principal display panel.", legalRef: "Rule 4, LM Rules 2011", category: "Declaration", severity: "critical", active: true },
+      { code: "LM-002", title: "Legible Marking & Min Font Height", description: "Characters must meet minimum font height (e.g. 2mm-4mm depending on pack weight) and high contrast ratio.", legalRef: "Rule 6(1), LM Rules 2011", category: "Presentation", severity: "major", active: true },
+      { code: "LM-003", title: "Name & Address of Manufacturer/Packer", description: "Must carry full legal entity name, premises address, locality, and PIN code with prefix 'Mfd. by' or 'Pkd. by'.", legalRef: "Rule 4(2)(a), LM Rules 2011", category: "Declaration", severity: "critical", active: true },
+      { code: "LM-004", title: "Date of Manufacturing / Packing", description: "Must indicate exact pack date in DD-MM-YYYY format or 'Date of Pack'.", legalRef: "Rule 4(2)(c), LM Rules 2011", category: "Declaration", severity: "major", active: true },
+      { code: "LM-005", title: "Best Before / Expiry (Perishables)", description: "Mandatory for food, bakery, and perishables. Date must be logical relative to manufacturing.", legalRef: "Rule 4(2)(d), LM Rules 2011", category: "Declaration", severity: "major", active: true },
+      { code: "LM-006", title: "Country of Origin Declaration", description: "Country of origin is strictly mandatory on domestic packaging and all imported consignments.", legalRef: "Rule 4(2)(e), LM Rules 2011", category: "Declaration", severity: "major", active: true },
+      { code: "LM-007", title: "MRP Declaration (Taxes Inclusive)", description: "Maximum Retail Price must include 'inclusive of all taxes' notation clearly.", legalRef: "MRP Rules 2021", category: "Pricing", severity: "major", active: true },
+      { code: "LM-008", title: "Statutory Licence (FSSAI 14-Digit)", description: "Valid 14-digit FSSAI licence number is required for food items.", legalRef: "FSS Act 2006", category: "Declaration", severity: "critical", active: true },
+      { code: "LM-009", title: "Generic Name of Commodity", description: "Packaged article must be distinctly identified so consumer is not misled.", legalRef: "Rule 4(2)(b), LM Rules 2011", category: "Declaration", severity: "major", active: true },
+      { code: "LM-010", title: "Date Integrity & Anti-Tampering", description: "Manufacturing dates must never be in the future; best-before must not precede manufacture date.", legalRef: "Fair Packing Practice", category: "Integrity", severity: "critical", active: true }
+    ];
+
+    const DEFAULT_PRODUCTS = [
+      {
+        id: "prod-1",
+        name: "Roasted Almonds Premium",
+        category: "food",
+        hsnCode: "0802",
+        declaredWeight: "500",
+        packagingUnit: "g",
+        netQuantity: "500 g",
+        mrp: 899.00,
+        manufacturerName: "SpiceWala Foods Pvt Ltd",
+        manufacturerAddress: "B-14, Okhla Industrial Area Phase II, New Delhi 110020",
+        mfgLicense: "10023456789123",
+        countryOfOrigin: "India",
+        mfgDate: "2026-02-14",
+        expDate: "2026-08-14",
+        imageUrl: "/images/label-1.jpg"
+      },
+      {
+        id: "prod-2",
+        name: "Basmati Rice (Long Grain)",
+        category: "food",
+        hsnCode: "1006",
+        declaredWeight: "1",
+        packagingUnit: "kg",
+        netQuantity: "1 kg",
+        mrp: 649.00,
+        manufacturerName: "Aroma Grains (India) Ltd",
+        manufacturerAddress: "Plot 22, SEZ Unit, Sonipat, Haryana 131001",
+        mfgLicense: "10011122233344",
+        countryOfOrigin: "India",
+        mfgDate: "2026-02-20",
+        expDate: null,
+        imageUrl: "/images/label-2.jpg"
+      },
+      {
+        id: "prod-3",
+        name: "Toned Milk (Ambient)",
+        category: "dairy",
+        hsnCode: "0401",
+        declaredWeight: "2",
+        packagingUnit: "L",
+        netQuantity: "2 L",
+        mrp: 120.00,
+        manufacturerName: "Deshi Dairy Cooperative",
+        manufacturerAddress: "Survey No 88, Palghar Road, Thane 401101",
+        mfgLicense: "10055566677788",
+        countryOfOrigin: "India",
+        mfgDate: "2026-02-23",
+        expDate: "2026-05-24",
+        imageUrl: "/images/label-3.jpg"
+      },
+      {
+        id: "prod-4",
+        name: "Multigrain Atta 1kg",
+        category: "food",
+        hsnCode: "1904",
+        declaredWeight: "1",
+        packagingUnit: "kg",
+        netQuantity: "1 kg",
+        mrp: 245.00,
+        manufacturerName: "SpiceWala Foods Pvt Ltd",
+        manufacturerAddress: "B-14, Okhla Industrial Area Phase II, New Delhi 110020",
+        mfgLicense: "10023456789123",
+        countryOfOrigin: "India",
+        mfgDate: "2026-02-24",
+        expDate: "2026-10-24",
+        imageUrl: "/images/label-1.jpg"
+      },
+      {
+        id: "prod-5",
+        name: "Cold-Pressed Groundnut Oil",
+        category: "food",
+        hsnCode: "1508",
+        declaredWeight: "1",
+        packagingUnit: "L",
+        netQuantity: "1 L",
+        mrp: 645.00,
+        manufacturerName: "Himalia Oils & Extracts",
+        manufacturerAddress: "Unit 7, MIDC Chakan, Pune 410501",
+        mfgLicense: "10099988877766",
+        countryOfOrigin: "India",
+        mfgDate: "2026-02-01",
+        expDate: "2026-12-01",
+        imageUrl: "/images/label-2.jpg"
+      }
+    ];
+
+    const DEFAULT_REPORTS = [
+      {
+        id: "REP-98214",
+        productId: "prod-1",
+        productName: "Roasted Almonds Premium",
+        result: "compliant",
+        score: 100,
+        passed: 10,
+        failed: 0,
+        warnings: 0,
+        createdAt: "2026-02-24T10:30:00Z",
+        summary: "All 10 applicable Legal Metrology rules verified successfully. Principal display panel Net Weight (500 g), FSSAI license, MRP, and dates are fully compliant.",
+        findings: [
+          { code: "LM-001", status: "pass", detail: "Net quantity '500 g' found on principal display panel.", evidence: "OCR matched 'Net Wt: 500 g' at confidence 98%" },
+          { code: "LM-002", status: "pass", detail: "Estimated font height 3.2mm meets Rule 6 minimum.", evidence: "Glyph height: 3.2mm; Contrast: 12.4:1" },
+          { code: "LM-003", status: "pass", detail: "Full legal manufacturer name and address detected.", evidence: "Mfd. by: SpiceWala Foods Pvt Ltd, B-14, Okhla Phase II, New Delhi 110020" },
+          { code: "LM-004", status: "pass", detail: "Mfg date formatted as DD-MM-YYYY.", evidence: "Mfd. on: 14-02-2026" },
+          { code: "LM-005", status: "pass", detail: "Best Before date valid and present.", evidence: "Best Before: 13-08-2026" },
+          { code: "LM-006", status: "pass", detail: "Country of origin clearly declared.", evidence: "Product of India" },
+          { code: "LM-007", status: "pass", detail: "MRP declared with 'incl. of all taxes'.", evidence: "MRP: ₹899.00 incl. of all taxes" },
+          { code: "LM-008", status: "pass", detail: "14-digit FSSAI statutory licence verified.", evidence: "Mfg. Lic. No: 10023456789123" },
+          { code: "LM-009", status: "pass", detail: "Product name clearly distinguished.", evidence: "Roasted Almonds Premium" },
+          { code: "LM-010", status: "pass", detail: "Date sequence is chronological (180 days shelf life).", evidence: "14-02-2026 to 13-08-2026" }
+        ]
+      },
+      {
+        id: "REP-98188",
+        productId: "prod-2",
+        productName: "Basmati Rice (Long Grain)",
+        result: "compliant",
+        score: 95,
+        passed: 9,
+        failed: 0,
+        warnings: 1,
+        createdAt: "2026-02-23T14:15:00Z",
+        summary: "Pack passed all mandatory requirements. Best-before date is exempt for cereals under Rule 4. Minor recommendation on MRP phrasing.",
+        findings: [
+          { code: "LM-001", status: "pass", detail: "Net quantity '1 kg' verified.", evidence: "Net Weight 1 kg" },
+          { code: "LM-002", status: "pass", detail: "Character height 4.1mm.", evidence: "Glyph height: 4.1mm" },
+          { code: "LM-003", status: "pass", detail: "Packer name and address present.", evidence: "Pkd. by: Aroma Grains Ltd, Sonipat 131001" },
+          { code: "LM-004", status: "pass", detail: "Date of pack present.", evidence: "Date of Pack: 20-02-2026" },
+          { code: "LM-005", status: "not_applicable", detail: "Cereal staples exempt from best-before.", evidence: "Exemption noted under Rule 4 schedule" },
+          { code: "LM-006", status: "pass", detail: "Country of Origin declared.", evidence: "Product of India" },
+          { code: "LM-007", status: "warning", detail: "MRP printed without 'incl. of all taxes' suffix.", evidence: "MRP ₹649.00 (Recommendation to add tax note)" },
+          { code: "LM-008", status: "pass", detail: "FSSAI license verified.", evidence: "FSSAI Lic: 10011122233344" },
+          { code: "LM-009", status: "pass", detail: "Article identified.", evidence: "Aroma Basmati (Long Grain)" },
+          { code: "LM-010", status: "pass", detail: "Dates consistent.", evidence: "Pack date matches batch sheet" }
+        ]
+      },
+      {
+        id: "REP-97940",
+        productId: "prod-3",
+        productName: "Toned Milk (Ambient)",
+        result: "non_compliant",
+        score: 80,
+        passed: 8,
+        failed: 2,
+        warnings: 0,
+        createdAt: "2026-02-22T09:40:00Z",
+        summary: "Critical failure: Manufacturer address is missing street name & PIN code on artwork. Pack cannot be distributed until reprinted.",
+        findings: [
+          { code: "LM-001", status: "pass", detail: "Net quantity '2 L' detected.", evidence: "Net Content: 2 L" },
+          { code: "LM-002", status: "pass", detail: "Legible font.", evidence: "Height 3.0mm" },
+          { code: "LM-003", status: "fail", detail: "Manufacturer address missing city and PIN code.", evidence: "Label only shows 'Deshi Dairy' with no address" },
+          { code: "LM-004", status: "pass", detail: "Mfg date present.", evidence: "Mfd. on: 23-02-2026" },
+          { code: "LM-005", status: "pass", detail: "Best-before date present.", evidence: "Best before: 24-05-2026" },
+          { code: "LM-006", status: "pass", detail: "Country of origin present.", evidence: "Product of India" },
+          { code: "LM-007", status: "fail", detail: "MRP absent or illegible.", evidence: "No 'MRP' text found on reverse panel" },
+          { code: "LM-008", status: "pass", detail: "FSSAI licence present.", evidence: "FSSAI Lic. No: 10055566677788" },
+          { code: "LM-009", status: "pass", detail: "Product identified.", evidence: "Deshi Toned Milk" },
+          { code: "LM-010", status: "pass", detail: "Dates valid.", evidence: "Timeline: 90 days" }
+        ]
+      }
+    ];
+
+    // Local state managers
+    let state = {
+      user: null,
+      products: [],
+      rules: [],
+      reports: [],
+      currentReportForModal: null,
+      activeTab: "dashboard",
+      currentScannerProduct: null,
+      currentScanImage: "/images/label-1.jpg"
+    };
+
+    function initAppState() {
+      // 1. Load User
+      const storedUser = localStorage.getItem("lm_user");
+      if (storedUser) {
+        try { state.user = JSON.parse(storedUser); } catch(e){}
+      }
+      
+      // 2. Load Products
+      const storedProducts = localStorage.getItem("lm_standalone_products");
+      state.products = storedProducts ? JSON.parse(storedProducts) : DEFAULT_PRODUCTS;
+
+      // 3. Load Rules
+      const storedRules = localStorage.getItem("lm_standalone_rules");
+      state.rules = storedRules ? JSON.parse(storedRules) : DEFAULT_RULES;
+
+      // 4. Load Reports
+      const storedReports = localStorage.getItem("lm_standalone_reports");
+      state.reports = storedReports ? JSON.parse(storedReports) : DEFAULT_REPORTS;
+
+      // Show Auth or Main
+      if (state.user) {
+        showMainApp();
+      } else {
+        showAuthScreen();
+      }
+    }
+
+    // ---------- AUTH FUNCTIONS ----------
+    let isRegisterMode = false;
+
+    function showAuthScreen() {
+      document.getElementById("auth-screen").classList.remove("hidden");
+      document.getElementById("main-app").classList.add("hidden");
+    }
+
+    function showMainApp() {
+      document.getElementById("auth-screen").classList.add("hidden");
+      document.getElementById("main-app").classList.remove("hidden");
+
+      // Update User in sidebar
+      if (state.user) {
+        document.getElementById("user-display-name").innerText = state.user.name || "Demo User";
+        document.getElementById("user-display-company").innerText = state.user.company || state.user.role || "Balaji Foods";
+        const initials = (state.user.name || "DU").split(" ").map(s=>s[0]).slice(0,2).join("").toUpperCase();
+        document.getElementById("user-avatar").innerText = initials;
+      }
+
+      renderDashboard();
+      renderProducts();
+      renderReports();
+      renderRules();
+      initScannerDropdown();
+    }
+
+    function toggleAuthMode() {
+      isRegisterMode = !isRegisterMode;
+      const regFields = document.getElementById("register-fields");
+      const title = document.getElementById("auth-title");
+      const subtitle = document.getElementById("auth-subtitle");
+      const btn = document.getElementById("auth-submit-btn");
+      const prompt = document.getElementById("auth-toggle-prompt");
+      const toggleBtn = document.getElementById("auth-toggle-btn");
+
+      if (isRegisterMode) {
+        regFields.classList.remove("hidden");
+        title.innerText = "Create your account";
+        subtitle.innerText = "Start verifying packaging labels in seconds";
+        btn.innerText = "Create Account & Sign In";
+        prompt.innerText = "Already have an account?";
+        toggleBtn.innerText = "Sign in";
+      } else {
+        regFields.classList.add("hidden");
+        title.innerText = "Welcome back";
+        subtitle.innerText = "Sign in to continue to your dashboard";
+        btn.innerText = "Sign In";
+        prompt.innerText = "Don't have an account?";
+        toggleBtn.innerText = "Sign up";
+      }
+    }
+
+    function quickLoginDemo() {
+      const demoUser = {
+        id: "demo-user",
+        name: "Shraddha Murdia",
+        email: "demo@scansure.ai",
+        company: "Balaji Foods Pvt Ltd",
+        role: "Packer & Manufacturer"
+      };
+      state.user = demoUser;
+      localStorage.setItem("lm_user", JSON.stringify(demoUser));
+      showMainApp();
+    }
+
+    function handleAuthSubmit(e) {
+      e.preventDefault();
+      const email = document.getElementById("auth-email").value.trim();
+      const name = isRegisterMode ? document.getElementById("auth-name").value.trim() : email.split("@")[0];
+      const company = isRegisterMode ? document.getElementById("auth-company").value.trim() : "Balaji Foods";
+      const role = isRegisterMode ? document.getElementById("auth-role").value : "Packer";
+
+      const user = {
+        id: "user-" + Date.now(),
+        name: name || "Verified User",
+        email: email,
+        company: company || "Packer / Seller",
+        role: role
+      };
+
+      state.user = user;
+      localStorage.setItem("lm_user", JSON.stringify(user));
+      showMainApp();
+    }
+
+    function handleLogout() {
+      localStorage.removeItem("lm_user");
+      state.user = null;
+      showAuthScreen();
+    }
+
+    // ---------- NAVIGATION ----------
+    function navigateTab(tabName) {
+      state.activeTab = tabName;
+      // Auto-release camera hardware when leaving the scanner tab
+      if (tabName !== 'scanner' && typeof stopLiveCamera === 'function') {
+        stopLiveCamera();
+      }
+      ['dashboard', 'products', 'scanner', 'reports', 'rules'].forEach(t => {
+        document.getElementById(`tab-${t}`).classList.add("hidden");
+        const navBtn = document.getElementById(`nav-${t}`);
+        if (navBtn) {
+          navBtn.classList.remove("bg-blue-600", "text-white");
+          navBtn.classList.add("text-slate-400");
+        }
+      });
+
+      document.getElementById(`tab-${tabName}`).classList.remove("hidden");
+      const activeNav = document.getElementById(`nav-${tabName}`);
+      if (activeNav) {
+        activeNav.classList.add("bg-blue-600", "text-white");
+        activeNav.classList.remove("text-slate-400");
+      }
+    }
+
+    function quickSwitchMobileTab() {
+      const next = state.activeTab === 'dashboard' ? 'scanner' : (state.activeTab === 'scanner' ? 'products' : 'dashboard');
+      navigateTab(next);
+    }
+
+    // ---------- DASHBOARD ----------
+    function countUp(el, target, suffix = "") {
+      if (!el) return;
+      const dur = 850; let start = 0;
+      const step = (t) => {
+        if (!start) start = t;
+        const p = Math.min(1, (t - start) / dur);
+        const eased = 1 - Math.pow(1 - p, 3);
+        el.innerText = Math.round(target * eased).toLocaleString("en-IN") + suffix;
+        if (p < 1) requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    }
+    function renderDashboard() {
+      countUp(document.getElementById("stat-products-count"), state.products.length);
+      countUp(document.getElementById("stat-scans-count"), state.reports.length + 1);
+      countUp(document.getElementById("stat-reports-count"), state.reports.length);
+
+      const avg = Math.round(state.reports.reduce((acc, r) => acc + (r.score || 0), 0) / Math.max(1, state.reports.length));
+      countUp(document.getElementById("stat-avg-score"), avg, "%");
+
+      // animate breakdown bars
+      const total = (state.reports.filter(r=>r.result==="compliant").length) + (state.reports.filter(r=>r.result==="non_compliant").length) + (state.reports.filter(r=>r.result==="needs_review").length) || 1;
+      const pct = (res) => Math.round(state.reports.filter(r=>r.result===res).length / total * 100);
+      const bars = [
+        ["dash-bar-pass", pct("compliant"), "dash-pct-pass"],
+        ["dash-bar-warn", pct("needs_review"), "dash-pct-warn"],
+        ["dash-bar-fail", pct("non_compliant"), "dash-pct-fail"]
+      ];
+      bars.forEach(([id, p, pid]) => {
+        const bar = document.getElementById(id);
+        if (bar) { bar.classList.remove("bar-grow"); void bar.offsetWidth; bar.style.width = p + "%"; bar.classList.add("bar-grow"); }
+        const pl = document.getElementById(pid);
+        if (pl) countUp(pl, p, "%");
+      });
+
+      // Render Recent Reports table
+      const tbody = document.getElementById("dashboard-recent-reports");
+      tbody.innerHTML = state.reports.slice(0, 4).map(r => {
+        const badgeColor = r.result === 'compliant' ? 'bg-emerald-100 text-emerald-800' : (r.result === 'non_compliant' ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800');
+        const dateStr = new Date(r.createdAt).toLocaleDateString("en-IN", { day: '2-digit', month: 'short' });
+        return `
+          <tr class="hover:bg-slate-50 transition">
+            <td class="py-3 font-semibold text-slate-800">${r.productName}</td>
+            <td class="py-3">
+              <span class="px-2 py-0.5 rounded-full text-xs font-bold uppercase ${badgeColor}">${r.result.replace('_', ' ')}</span>
+            </td>
+            <td class="py-3 font-bold ${r.score >= 90 ? 'text-emerald-600' : (r.score >= 70 ? 'text-amber-600' : 'text-rose-600')}">${r.score}%</td>
+            <td class="py-3 text-slate-500">${dateStr}</td>
+            <td class="py-3 text-right">
+              <button onclick="openReportModal('${r.id}')" class="text-xs font-semibold text-blue-600 hover:text-blue-800">Certificate &rarr;</button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    // ---------- PRODUCTS MASTER (CRUD) ----------
+    function renderProducts() {
+      const query = (document.getElementById("product-search-input")?.value || "").toLowerCase();
+      const cat = document.getElementById("product-category-filter")?.value || "all";
+
+      const filtered = state.products.filter(p => {
+        const matchesQ = !query || p.name.toLowerCase().includes(query) || p.manufacturerName.toLowerCase().includes(query) || (p.hsnCode || "").toLowerCase().includes(query);
+        const matchesC = cat === 'all' || p.category === cat;
+        return matchesQ && matchesC;
+      });
+
+      const container = document.getElementById("products-grid");
+      if (!container) return;
+
+      if (filtered.length === 0) {
+        container.innerHTML = `
+          <div class="col-span-full py-12 text-center bg-white rounded-2xl border border-slate-200">
+            <p class="text-sm font-semibold text-slate-600">No matching products found</p>
+            <button onclick="openProductModal()" class="mt-2 text-xs font-bold text-blue-600 hover:underline">Add New Product</button>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = filtered.map((p, i) => `
+        <div class="lift fade-up bg-white rounded-2xl border border-slate-200 p-5 shadow-sm flex flex-col justify-between" style="animation-delay:${Math.min(i,8)*55}ms">
+          <div>
+            <div class="flex items-start justify-between gap-2 mb-2">
+              <h3 class="font-bold text-slate-900 text-sm leading-snug">${p.name}</h3>
+              <span class="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase bg-slate-100 text-slate-700">${p.category}</span>
+            </div>
+            <div class="space-y-1.5 text-xs text-slate-500 mt-3">
+              <div class="flex justify-between">
+                <span>Declared Qty:</span>
+                <span class="font-semibold text-slate-800">${p.netQuantity}</span>
+              </div>
+              <div class="flex justify-between">
+                <span>MRP (incl taxes):</span>
+                <span class="font-semibold text-slate-800">₹${p.mrp ? p.mrp.toFixed(2) : '—'}</span>
+              </div>
+              <div class="flex justify-between">
+                <span>FSSAI Lic:</span>
+                <span class="font-mono text-slate-700">${p.mfgLicense || 'Exempt'}</span>
+              </div>
+              <div class="truncate text-[11px] text-slate-400 mt-2">
+                ${p.manufacturerName}
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+            <button onclick="launchScannerForProduct('${p.id}')" class="flex-1 py-1.5 px-3 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold text-xs flex items-center justify-center gap-1">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7V5a2 2 0 012-2h2m10 0h2a2 2 0 012 2v2m0 10v2a2 2 0 01-2 2h-2m-10 0H5a2 2 0 01-2-2v-2m0-6h18"/></svg>
+              Scan Label
+            </button>
+            <button onclick="editProduct('${p.id}')" class="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100" title="Edit">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+            </button>
+            <button onclick="deleteProduct('${p.id}')" class="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50" title="Delete">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+            </button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function openProductModal(p = null) {
+      document.getElementById("product-modal-title").innerText = p ? "Edit Product SKU" : "Add New Product SKU";
+      document.getElementById("pm-id").value = p ? p.id : "";
+      document.getElementById("pm-name").value = p ? p.name : "";
+      document.getElementById("pm-category").value = p ? p.category : "food";
+      document.getElementById("pm-hsn").value = p ? (p.hsnCode || "") : "";
+      document.getElementById("pm-weight").value = p ? p.declaredWeight : "500";
+      document.getElementById("pm-unit").value = p ? p.packagingUnit : "g";
+      document.getElementById("pm-net-qty").value = p ? p.netQuantity : "500 g";
+      document.getElementById("pm-mrp").value = p ? (p.mrp || "") : "899.00";
+      document.getElementById("pm-lic").value = p ? (p.mfgLicense || "") : "10023456789123";
+      document.getElementById("pm-mfg-name").value = p ? p.manufacturerName : "SpiceWala Foods Pvt Ltd";
+      document.getElementById("pm-address").value = p ? p.manufacturerAddress : "B-14, Okhla Industrial Area Phase II, New Delhi 110020";
+      document.getElementById("pm-mfg-date").value = p ? p.mfgDate : "2026-02-14";
+      document.getElementById("pm-exp-date").value = p ? (p.expDate || "") : "2026-08-14";
+
+      document.getElementById("product-modal").classList.remove("hidden");
+    }
+
+    function closeProductModal() {
+      document.getElementById("product-modal").classList.add("hidden");
+    }
+
+    function handleProductSave(e) {
+      e.preventDefault();
+      const id = document.getElementById("pm-id").value;
+      const productObj = {
+        id: id || "prod-" + Date.now(),
+        name: document.getElementById("pm-name").value.trim(),
+        category: document.getElementById("pm-category").value,
+        hsnCode: document.getElementById("pm-hsn").value.trim() || null,
+        declaredWeight: document.getElementById("pm-weight").value.trim(),
+        packagingUnit: document.getElementById("pm-unit").value,
+        netQuantity: document.getElementById("pm-net-qty").value.trim(),
+        mrp: parseFloat(document.getElementById("pm-mrp").value) || null,
+        mfgLicense: document.getElementById("pm-lic").value.trim() || null,
+        manufacturerName: document.getElementById("pm-mfg-name").value.trim(),
+        manufacturerAddress: document.getElementById("pm-address").value.trim(),
+        mfgDate: document.getElementById("pm-mfg-date").value,
+        expDate: document.getElementById("pm-exp-date").value || null,
+        imageUrl: "/images/label-1.jpg"
+      };
+
+      if (id) {
+        state.products = state.products.map(p => p.id === id ? productObj : p);
+      } else {
+        state.products.unshift(productObj);
+      }
+
+      localStorage.setItem("lm_standalone_products", JSON.stringify(state.products));
+      closeProductModal();
+      renderProducts();
+      initScannerDropdown();
+    }
+
+    function editProduct(id) {
+      const p = state.products.find(x => x.id === id);
+      if (p) openProductModal(p);
+    }
+
+    function deleteProduct(id) {
+      if (confirm("Are you sure you want to delete this product SKU?")) {
+        state.products = state.products.filter(p => p.id !== id);
+        localStorage.setItem("lm_standalone_products", JSON.stringify(state.products));
+        renderProducts();
+        initScannerDropdown();
+      }
+    }
+
+    function launchScannerForProduct(id) {
+      navigateTab('scanner');
+      const select = document.getElementById("scanner-product-select");
+      if (select) {
+        select.value = id;
+        selectScannerProduct();
+      }
+    }
+
+    // ---------- 8-STAGE SCANNER PIPELINE (OCR BOUNDING BOXES + EVIDENCE) ----------
+    const SCAN_STAGES = [
+      { id: "upload", num: 1, label: "Upload / Capture", mode: "UPLOAD" },
+      { id: "preview", num: 2, label: "Image Preview", mode: "PREVIEW" },
+      { id: "processing", num: 3, label: "Processing", mode: "OCR RUN" },
+      { id: "extracted", num: 4, label: "Extracted Info", mode: "EXTRACTION" },
+      { id: "evaluation", num: 5, label: "Compliance Eval", mode: "EVALUATION" },
+      { id: "evidence", num: 6, label: "Evidence Viewer", mode: "EVIDENCE" },
+      { id: "manual", num: 7, label: "Manual Verify", mode: "INSPECTOR" },
+      { id: "report", num: 8, label: "Final Report", mode: "CERTIFIED" }
+    ];
+
+    const FIELD_LABELS = {
+      brand: "Brand / Article", netWeight: "Net Quantity", manufacturer: "Manufacturer",
+      address: "Address", mfgDate: "Mfg Date", bestBefore: "Best Before",
+      mrp: "MRP", licence: "FSSAI Licence", countryOfOrigin: "Country of Origin"
+    };
+    const REGION_LAYOUT = {
+      brand: { x: 0.28, y: 0.05, w: 0.44, h: 0.11, rule: "LM-009" },
+      manufacturer: { x: 0.07, y: 0.54, w: 0.42, h: 0.07, rule: "LM-003" },
+      address: { x: 0.07, y: 0.63, w: 0.46, h: 0.07, rule: "LM-003" },
+      mfgDate: { x: 0.55, y: 0.54, w: 0.31, h: 0.07, rule: "LM-004" },
+      bestBefore: { x: 0.55, y: 0.63, w: 0.33, h: 0.07, rule: "LM-005" },
+      netWeight: { x: 0.05, y: 0.76, w: 0.25, h: 0.10, rule: "LM-001" },
+      mrp: { x: 0.66, y: 0.74, w: 0.28, h: 0.11, rule: "LM-007" },
+      licence: { x: 0.05, y: 0.89, w: 0.36, h: 0.07, rule: "LM-008" },
+      countryOfOrigin: { x: 0.44, y: 0.89, w: 0.28, h: 0.07, rule: "LM-006" }
+    };
+    const BOX_COLORS = { pass: "#10b981", warning: "#f59e0b", fail: "#ef4444", not_applicable: "#94a3b8", missing: "#f43f5e" };
+
+    let scanState = {
+      stage: "upload",
+      farthest: 1,
+      product: null,
+      image: "/images/label-1.jpg",
+      backImage: null,
+      panels: 1,
+      canvasSide: "front",
+      confidence: 0,
+      extracted: {},
+      regions: [],
+      findings: [],
+      overrides: {},
+      selectedRule: null,
+      zoom: 1,
+      originX: 50,
+      originY: 50,
+      lastReportId: null,
+      history: []
+    };
+
+    function hexA(hex, a) {
+      const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+      return "rgba(" + r + "," + g + "," + b + "," + a + ")";
+    }
+    function dotColor(s) { return s === "pass" ? "bg-emerald-500" : s === "fail" ? "bg-rose-500" : s === "warning" ? "bg-amber-500" : "bg-slate-400"; }
+    function txtColor(s) { return s === "pass" ? "text-emerald-600" : s === "fail" ? "text-rose-600" : s === "warning" ? "text-amber-600" : "text-slate-400"; }
+    function badgeBg(s) { return s === "pass" ? "bg-emerald-100 text-emerald-800" : s === "fail" ? "bg-rose-100 text-rose-800" : s === "warning" ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-600"; }
+
+    function loadHistory() {
+      try { scanState.history = JSON.parse(localStorage.getItem("lm_scansure_history") || "[]"); } catch (e) { scanState.history = []; }
+    }
+    function saveHistory() {
+      try { localStorage.setItem("lm_scansure_history", JSON.stringify(scanState.history.slice(0, 12))); } catch (e) {}
+    }
+
+    function initScannerDropdown() {
+      const sel = document.getElementById("scanner-product-select");
+      if (!sel) return;
+      sel.innerHTML = state.products.map(p => `<option value="${p.id}">${p.name} (${p.netQuantity})</option>`).join("");
+      selectScannerProduct();
+      loadHistory();
+      renderHistory();
+      renderStepper();
+      SCAN_STAGES.forEach(s => {
+        const el = document.getElementById("sp-" + s.id);
+        if (el) el.classList.toggle("hidden", s.id !== "upload");
+      });
+    }
+
+    function selectScannerProduct() {
+      const id = document.getElementById("scanner-product-select")?.value;
+      const p = state.products.find(x => x.id === id) || state.products[0];
+      scanState.product = p;
+      if (p) {
+        const img = p.imageUrl || "/images/label-1.jpg";
+        if (!scanState.findings.length) {
+          scanState.image = img;
+          document.getElementById("scan-img").src = img;
+          clearUploadPreview();
+        }
+        document.getElementById("scan-product-info").innerHTML =
+          `<strong>Master spec:</strong> Net Qty <span class="font-bold">${p.netQuantity}</span> · MRP ${p.mrp ? "₹" + p.mrp.toFixed(2) : "—"} · Lic ${p.mfgLicense || "—"} · ${p.manufacturerName}`;
+      }
+    }
+
+    function launchScannerForProduct(id) {
+      navigateTab("scanner");
+      const sel = document.getElementById("scanner-product-select");
+      if (sel) sel.value = id;
+      scanState.extracted = {}; scanState.regions = []; scanState.findings = []; scanState.overrides = {};
+      scanState.selectedRule = null; scanState.farthest = 1;
+      selectScannerProduct();
+      setScanStage("preview");
+    }
+
+    function setPresetScanImage(url, label) {
+      scanState.image = url;
+      document.getElementById("scan-img").src = url;
+      document.getElementById("mode-chip").innerText = "MODE: PRESET SAMPLE";
+      if (label) showUploadPreview(url, label + " (sample label)", "Sample artwork");
+    }
+
+    function showUploadPreview(url, name, sizeText) {
+      const box = document.getElementById("upload-preview");
+      if (!box) return;
+      document.getElementById("upload-preview-img").src = url;
+      document.getElementById("upload-preview-name").innerText = name || "label-image";
+      const sz = document.getElementById("upload-preview-size");
+      if (sz) sz.innerText = sizeText || "";
+      box.classList.remove("hidden");
+      box.classList.remove("scale-in");
+      void box.offsetWidth;
+      box.classList.add("scale-in");
+    }
+    function clearUploadPreview() {
+      const box = document.getElementById("upload-preview");
+      if (!box) return;
+      box.classList.add("hidden");
+      box.classList.remove("scale-in");
+    }
+
+    function handleCustomFileUpload(e) {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function (evt) {
+        scanState.image = evt.target.result;
+        document.getElementById("scan-img").src = evt.target.result;
+        document.getElementById("mode-chip").innerText = "MODE: CUSTOM UPLOAD";
+        showUploadPreview(evt.target.result, file.name, (file.size / 1024).toFixed(0) + " KB · JPG/PNG");
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function handleBackFileUpload(e) {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function (evt) {
+        scanState.backImage = evt.target.result;
+        scanState.panels = 2;
+        document.getElementById("back-thumb-img").src = evt.target.result;
+        document.getElementById("back-thumb").classList.remove("hidden");
+        document.getElementById("back-thumb").classList.add("flex");
+        document.getElementById("back-remove-btn").classList.remove("hidden");
+        updateCanvasImage();
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function clearBackImage() {
+      scanState.backImage = null;
+      scanState.panels = 1;
+      scanState.canvasSide = "front";
+      document.getElementById("back-thumb").classList.add("hidden");
+      document.getElementById("back-thumb").classList.remove("flex");
+      document.getElementById("back-remove-btn").classList.add("hidden");
+      updateCanvasImage();
+      updateSideToggle();
+    }
+
+    const FRONT_FIELDS = new Set(["brand", "netWeight", "mrp", "countryOfOrigin"]);
+    function genRegions(p, extracted, confidence, panels = 1) {
+      const seed = p.name.length;
+      const rand = (n) => ((seed * 31 + n * 17) % 100) / 100;
+      return Object.entries(REGION_LAYOUT).map(([field, l], i) => {
+        const found = extracted == null || extracted[field] != null;
+        return {
+          id: "rg-" + field, field, ruleCode: l.rule,
+          x: Math.min(0.97, Math.max(0.03, l.x + (rand(i + 11) - 0.5) * 0.05)),
+          y: Math.min(0.97, Math.max(0.03, l.y + (rand(i + 21) - 0.5) * 0.04)),
+          w: l.w, h: l.h,
+          confidence: found ? Math.max(52, Math.min(99, confidence - Math.round(rand(i + 31) * 12))) : 0,
+          found,
+          side: panels === 2 ? (FRONT_FIELDS.has(field) ? "front" : "back") : "front"
+        };
+      });
+    }
+
+    // ---- Stage navigation ----
+    function renderStepper() {
+      const track = document.getElementById("stepper-track");
+      if (!track) return;
+      const currentIdx = SCAN_STAGES.findIndex(s => s.id === scanState.stage);
+      track.innerHTML = SCAN_STAGES.map((s, i) => {
+        const done = i < currentIdx, active = i === currentIdx, reachable = i <= scanState.farthest;
+        return `
+          <button onclick="setScanStage('${s.id}')" ${reachable ? "" : "disabled"} class="flex items-center gap-1.5 px-2.5 py-2 rounded-lg whitespace-nowrap transition ${active ? "bg-blue-600 text-white shadow-sm" : done ? "bg-slate-100 text-slate-700 hover:bg-slate-200" : reachable ? "text-slate-500 hover:bg-slate-100" : "text-slate-300 cursor-not-allowed"}">
+            <span class="flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold ${active ? "bg-white/25" : done ? "bg-emerald-500 text-white" : "bg-slate-200 text-slate-500"}">${done ? "✓" : s.num}</span>
+            <span class="text-[11px] font-bold">${s.label}</span>
+          </button>
+          ${i < SCAN_STAGES.length - 1 ? '<span class="h-px w-2.5 bg-slate-200 shrink-0"></span>' : ""}
+        `;
+      }).join("");
+      document.getElementById("step-counter").innerText = `Step ${currentIdx + 1} of 8`;
+    }
+
+    function setScanStage(stage) {
+      const order = SCAN_STAGES.map(s => s.id);
+      const idx = order.indexOf(stage);
+      if (idx < 0 || idx > scanState.farthest) return;
+      scanState.stage = stage;
+      renderStepper();
+      SCAN_STAGES.forEach(s => {
+        const el = document.getElementById("sp-" + s.id);
+        if (el) el.classList.toggle("hidden", s.id !== stage);
+      });
+      const s = SCAN_STAGES[idx];
+      document.getElementById("stage-title").innerText = s.num + " · " + s.label;
+      document.getElementById("stage-hint").innerText = s.mode;
+      if (stage === "upload" || stage === "preview") {
+        scanState.selectedRule = null;
+        canvasZoomReset();
+        clearBoxes();
+        if (stage === "preview") fillPreview();
+      }
+      if (stage === "extracted" && scanState.regions.length) renderBoxes("allpass");
+      if (["evaluation", "evidence", "manual", "report"].includes(stage) && scanState.regions.length) renderBoxes("status");
+      if (stage === "evaluation") renderEvaluation();
+      if (stage === "evidence") {
+        if (!scanState.selectedRule && scanState.findings.length) scanState.selectedRule = scanState.findings[0].code;
+        renderEvidencePanel();
+        if (scanState.selectedRule) zoomToRegion(scanState.selectedRule);
+      }
+      if (stage === "manual") renderManual();
+      if (stage === "report") renderReportPanel();
+    }
+
+    function fillPreview() {
+      const p = scanState.product;
+      if (!p) return;
+      document.getElementById("pv-product").innerText = p.name;
+      document.getElementById("pv-qty").innerText = p.netQuantity;
+      document.getElementById("pv-mrp").innerText = p.mrp ? "₹" + p.mrp.toFixed(2) : "—";
+      document.getElementById("pv-mfg").innerText = p.manufacturerName;
+    }
+
+    // ---- Bounding box rendering ----
+    function currentBoxMode() {
+      return scanState.stage === "extracted" ? "allpass" : "status";
+    }
+    function findingStatusByRule(code) {
+      const f = scanState.findings.find(x => x.code === code);
+      return f ? f.status : "not_applicable";
+    }
+    function clearBoxes() {
+      const layer = document.getElementById("boxes-layer");
+      if (layer) layer.innerHTML = "";
+    }
+
+    function renderBoxes(mode) {
+      const layer = document.getElementById("boxes-layer");
+      if (!layer) return;
+      layer.innerHTML = "";
+      if (!scanState.regions.length) return;
+      const showLabels = document.getElementById("labels-toggle")?.checked !== false;
+      const interactive = ["evaluation", "evidence", "manual"].includes(scanState.stage);
+      const twoPanels = (scanState.panels || 1) === 2;
+      const regions = twoPanels
+        ? scanState.regions.filter(r => r.side === scanState.canvasSide)
+        : scanState.regions;
+      regions.forEach(r => {
+        let status;
+        if (mode === "allpass") status = r.found ? "pass" : "missing";
+        else status = r.found ? findingStatusByRule(r.ruleCode) : "missing";
+        const color = BOX_COLORS[status] || BOX_COLORS.not_applicable;
+        const dashed = status === "missing" || status === "not_applicable";
+        const sel = scanState.selectedRule === r.ruleCode && interactive;
+        const box = document.createElement("div");
+        box.className = "absolute rounded cursor-pointer";
+        box.style.left = (r.x * 100) + "%";
+        box.style.top = (r.y * 100) + "%";
+        box.style.width = (r.w * 100) + "%";
+        box.style.height = (r.h * 100) + "%";
+        box.style.border = "2px " + (dashed ? "dashed" : "solid") + " " + color;
+        box.style.background = status === "missing" ? "rgba(244,63,94,0.10)" : hexA(color, sel ? 0.30 : 0.14);
+        if (sel) box.style.boxShadow = "0 0 0 3px " + hexA(color, 0.55) + ", 0 0 18px 2px " + hexA(color, 0.35);
+        box.onclick = () => { if (interactive) selectRule(r.ruleCode); };
+        if (showLabels) {
+          const lab = document.createElement("span");
+          lab.className = "absolute whitespace-nowrap rounded px-1.5 py-0.5 text-[8px] font-bold leading-tight";
+          lab.style.top = "-17px";
+          lab.style.left = "0";
+          lab.style.background = color;
+          lab.style.color = (status === "fail" || status === "missing") ? "#fff" : "#0f172a";
+          lab.innerText = (FIELD_LABELS[r.field] || r.field).toUpperCase() + (r.found ? " · " + r.confidence + "%" : " · NOT FOUND");
+          box.appendChild(lab);
+        }
+        layer.appendChild(box);
+      });
+    }
+
+    function revealBoxesUpTo(n) {
+      const layer = document.getElementById("boxes-layer");
+      if (!layer) return;
+      layer.innerHTML = "";
+      scanState.regions.slice(0, n).forEach(r => {
+        const box = document.createElement("div");
+        box.className = "absolute rounded";
+        box.style.left = (r.x * 100) + "%";
+        box.style.top = (r.y * 100) + "%";
+        box.style.width = (r.w * 100) + "%";
+        box.style.height = (r.h * 100) + "%";
+        box.style.border = "2px solid #22d3ee";
+        box.style.background = "rgba(34,211,238,0.12)";
+        box.style.animation = "captureFlash 0.2s ease-out";
+        const lab = document.createElement("span");
+        lab.className = "absolute whitespace-nowrap rounded px-1.5 py-0.5 text-[8px] font-bold leading-tight";
+        lab.style.top = "-17px";
+        lab.style.left = "0";
+        lab.style.background = "#22d3ee";
+        lab.style.color = "#0f172a";
+        lab.innerText = (FIELD_LABELS[r.field] || r.field).toUpperCase();
+        box.appendChild(lab);
+        layer.appendChild(box);
+      });
+    }
+
+    // ---- Zoom / pan ----
+    function canvasZoom(factor) {
+      scanState.zoom = Math.min(4, Math.max(1, +(scanState.zoom * factor).toFixed(2)));
+      if (scanState.zoom <= 1.01) { scanState.originX = 50; scanState.originY = 50; }
+      applyZoom();
+    }
+    function canvasZoomReset() {
+      scanState.zoom = 1; scanState.originX = 50; scanState.originY = 50;
+      applyZoom();
+    }
+    function applyZoom() {
+      const zl = document.getElementById("zoom-layer");
+      if (!zl) return;
+      zl.style.transformOrigin = scanState.originX + "% " + scanState.originY + "%";
+      zl.style.transform = "scale(" + scanState.zoom + ")";
+      const chip = document.getElementById("zoom-chip");
+      if (chip) chip.innerText = scanState.zoom.toFixed(1) + "×";
+    }
+    function zoomToRegion(ruleCode) {
+      const r = scanState.regions.find(x => x.ruleCode === ruleCode);
+      if (!r) return;
+      scanState.originX = (r.x + r.w / 2) * 100;
+      scanState.originY = (r.y + r.h / 2) * 100;
+      scanState.zoom = 3;
+      applyZoom();
+      renderBoxes(currentBoxMode());
+    }
+
+    // ---- Front / Back panel toggle ----
+    function setCanvasSide(side) {
+      scanState.canvasSide = side;
+      updateCanvasImage();
+      updateSideToggle();
+      renderBoxes(currentBoxMode());
+    }
+    function updateCanvasImage() {
+      const img = document.getElementById("scan-img");
+      if (!img) return;
+      const twoPanels = (scanState.panels || 1) === 2;
+      if (twoPanels && scanState.canvasSide === "back" && scanState.backImage) {
+        img.src = scanState.backImage;
+      } else {
+        img.src = scanState.image || "/images/label-1.jpg";
+      }
+    }
+    function updateSideToggle() {
+      const toggle = document.getElementById("side-toggle");
+      if (!toggle) return;
+      const twoPanels = (scanState.panels || 1) === 2;
+      toggle.classList.toggle("hidden", !twoPanels);
+      toggle.classList.toggle("flex", twoPanels);
+      const f = document.getElementById("side-front");
+      const b = document.getElementById("side-back");
+      if (f && b) {
+        const frontActive = scanState.canvasSide === "front";
+        f.className = "px-2.5 py-1 transition-colors " + (frontActive ? "bg-slate-900 text-white" : "bg-white text-slate-500 hover:bg-slate-50");
+        b.className = "px-2.5 py-1 transition-colors " + (!frontActive ? "bg-slate-900 text-white" : "bg-white text-slate-500 hover:bg-slate-50");
+      }
+    }
+
+    // ---- Pipeline execution ----
+    function beginProcessing() {
+      const p = scanState.product || state.products[0];
+      if (!p) return;
+      scanState.findings = [];
+      scanState.overrides = {};
+      scanState.selectedRule = null;
+      scanState.canvasSide = "front";
+      scanState.regions = genRegions(p, null, 90, scanState.panels || 1);
+      setScanStage("processing");
+      updateSideToggle();
+      clearBoxes();
+      canvasZoomReset();
+      document.getElementById("scan-scanline").classList.remove("hidden");
+      const bar = document.getElementById("scan-progress-bar");
+      const label = document.getElementById("scan-stage-label");
+      const stepsEl = document.getElementById("scan-steps");
+      const stepDefs = [
+        { t: "Deskew & contrast normalization…", pct: 12, delay: 500 },
+        { t: "YOLO label-region detection…", pct: 32, delay: 550, boxes: 3 },
+        { t: "OCR glyph pass (160 DPI) across 9 panels…", pct: 56, delay: 650, boxes: 6 },
+        { t: "Classifying statutory declarations (NLP)…", pct: 80, delay: 600, boxes: 9 },
+        { t: "Evaluating 10 Legal Metrology rules…", pct: 94, delay: 550 },
+        { t: "Compiling forensic evidence…", pct: 100, delay: 450 }
+      ];
+      stepsEl.innerHTML = stepDefs.map((s2, i) => `
+        <div id="ps-step-${i}" class="flex items-center gap-2 ${i === 0 ? "text-slate-700" : "text-slate-400"}">
+          <span id="ps-dot-${i}" class="h-2 w-2 rounded-full shrink-0 ${i === 0 ? "bg-blue-600 animate-pulse" : "bg-slate-300"}"></span>${s2.t}
+        </div>`).join("");
+      let t = 100;
+      stepDefs.forEach((s2, i) => {
+        setTimeout(() => {
+          label.innerText = s2.t;
+          bar.style.width = s2.pct + "%";
+          for (let k = 0; k < i; k++) {
+            const d = document.getElementById("ps-dot-" + k);
+            if (d) d.className = "h-2 w-2 rounded-full shrink-0 bg-emerald-500";
+            const row = document.getElementById("ps-step-" + k);
+            if (row) row.className = "flex items-center gap-2 text-slate-400 line-through";
+          }
+          const dc = document.getElementById("ps-dot-" + i);
+          if (dc) dc.className = "h-2 w-2 rounded-full shrink-0 bg-blue-600 animate-pulse";
+          const rc = document.getElementById("ps-step-" + i);
+          if (rc) rc.className = "flex items-center gap-2 text-slate-700";
+          if (s2.boxes) revealBoxesUpTo(s2.boxes);
+        }, t);
+        t += s2.delay;
+      });
+      setTimeout(() => {
+        for (let k = 0; k < stepDefs.length; k++) {
+          const d = document.getElementById("ps-dot-" + k);
+          if (d) d.className = "h-2 w-2 rounded-full shrink-0 bg-emerald-500";
+          const row = document.getElementById("ps-step-" + k);
+          if (row) row.className = "flex items-center gap-2 text-slate-400 line-through";
+        }
+        finishProcessing(p);
+      }, t + 250);
+    }
+
+    function computeScan(p) {
+      const omitAddress = document.getElementById("sim-omit-address")?.checked;
+      const futureDate = document.getElementById("sim-future-date")?.checked;
+      const lowConfidence = document.getElementById("sim-low-confidence")?.checked;
+      const seed = p.name.length;
+      const rand = (n) => ((seed * 31 + n * 17) % 100) / 100;
+      const confidence = lowConfidence ? 58 : (78 + Math.round(rand(1) * 20));
+
+      const extracted = {
+        netWeight: "Net Wt: " + p.netQuantity,
+        brand: p.name,
+        manufacturer: "Mfd. by: " + p.manufacturerName,
+        address: omitAddress ? null : p.manufacturerAddress,
+        mfgDate: futureDate ? "15-09-2026" : p.mfgDate,
+        bestBefore: p.expDate ? "Best Before: " + p.expDate : null,
+        countryOfOrigin: "Product of India",
+        mrp: p.mrp ? "MRP: ₹" + p.mrp.toFixed(2) + (rand(2) > 0.85 ? "" : " incl. of all taxes") : null,
+        licence: p.mfgLicense || null
+      };
+
+      const panels = scanState.panels || 1;
+      const regions = genRegions(p, extracted, confidence, panels);
+      const findings = [];
+      const push = (code, title, status, detail, evidence) => findings.push({ code, title, status, detail, evidence });
+
+      push("LM-001", "Net Quantity Declaration", "pass", `Net quantity '${p.netQuantity}' verified on principal display panel.`, "OCR: 'Net Wt: " + p.netQuantity + "'");
+      push("LM-002", "Font Height & Legibility", lowConfidence ? "warning" : "pass",
+        lowConfidence ? "Contrast below 5:1 — minimum legibility threshold at risk." : "Estimated glyph height 3.4 mm — meets Rule 6 minimum.",
+        lowConfidence ? "Contrast ratio 4.2:1 detected." : "Glyph metrics: 3.4 mm, contrast 11.2:1.");
+      if (omitAddress) {
+        push("LM-003", "Manufacturer / Packer Address", "fail", "Manufacturer name detected but complete address with PIN code is MISSING.", "OCR located 'Mfd. by: " + p.manufacturerName + "' — no street/PIN found.");
+      } else {
+        push("LM-003", "Manufacturer / Packer Address", "pass", "Full legal name, premises address and PIN code present.", "Mfd. by: " + p.manufacturerName + ", " + p.manufacturerAddress);
+      }
+      if (futureDate) {
+        push("LM-004", "Date of Manufacture", "fail", "Manufacture date is in the FUTURE — anti-tampering violation.", "OCR: Mfd. on 15-09-2026 (post-dated).");
+      } else {
+        push("LM-004", "Date of Manufacture", "pass", "Valid pack date in DD-MM-YYYY format.", "Mfd. on: " + p.mfgDate);
+      }
+      const perish = p.category === "dairy" || p.category === "bakery";
+      push("LM-005", "Best Before / Expiry", extracted.bestBefore ? "pass" : (perish ? "fail" : "not_applicable"),
+        extracted.bestBefore ? "Best-before date present and logical." : (perish ? "Best-before missing on perishable SKU." : "Exempt — non-perishable category."),
+        extracted.bestBefore ? "Best Before: " + p.expDate : "No best-before region detected.");
+      push("LM-006", "Country of Origin", "pass", "Country of origin declared.", "Product of India");
+      const mrpOk = /incl\. of all taxes/i.test(extracted.mrp || "");
+      push("LM-007", "MRP (Incl. of all taxes)", !extracted.mrp ? "fail" : (mrpOk ? "pass" : "warning"),
+        !extracted.mrp ? "No MRP declaration detected." : (mrpOk ? "MRP with statutory tax note." : "MRP printed without 'incl. of all taxes'."),
+        extracted.mrp || "No 'MRP' text found.");
+      push("LM-008", "Statutory Licence (FSSAI)", extracted.licence ? "pass" : "fail",
+        extracted.licence ? "14-digit FSSAI licence verified." : "FSSAI licence missing (mandatory for this category).",
+        extracted.licence ? "Mfg. Lic. No: " + p.mfgLicense : "No licence block detected.");
+      push("LM-009", "Commodity Identification", "pass", "Article clearly identified on the pack.", "Label: " + p.name);
+      if (futureDate) {
+        push("LM-010", "Date Integrity / Anti-Tampering", "fail", "Pack date non-chronological — tampering flag raised.", "Future production code detected.");
+      } else {
+        push("LM-010", "Date Integrity / Anti-Tampering", "pass", "Dates chronological and shelf-life consistent.", "Mfg → BB timeline validated.");
+      }
+      return { extracted, confidence, regions, findings, panels };
+    }
+
+    function finishProcessing(p) {
+      const r = computeScan(p);
+      scanState.extracted = r.extracted;
+      scanState.confidence = r.confidence;
+      scanState.regions = r.regions;
+      scanState.findings = r.findings;
+      scanState.panels = r.panels || 1;
+      scanState.canvasSide = "front";
+      // scan data complete - unlock remaining pipeline stages
+      scanState.farthest = Math.max(scanState.farthest, 7);
+      document.getElementById("scan-scanline").classList.add("hidden");
+      updateSideToggle();
+      updateCanvasImage();
+      renderExtractedTable();
+      renderBoxes("allpass");
+      setScanStage("extracted");
+    }
+
+    function renderExtractedTable() {
+      const el = document.getElementById("extracted-table");
+      if (!el) return;
+      const found = scanState.regions.filter(r => r.found);
+      const avg = Math.round(found.reduce((a, r) => a + r.confidence, 0) / Math.max(1, found.length));
+      document.getElementById("extracted-avg").innerText = avg + "%";
+      el.innerHTML = scanState.regions.map(r => `
+        <div class="flex items-center gap-2.5 py-2 border-b border-slate-100 last:border-0">
+          <span class="h-2 w-2 rounded-full shrink-0 ${r.found ? "bg-emerald-500" : "bg-rose-500"}"></span>
+          <span class="w-28 text-[10px] font-bold text-slate-500 uppercase shrink-0">${FIELD_LABELS[r.field] || r.field}</span>
+          <span class="flex-1 text-[11px] text-slate-800 truncate font-mono">${r.found ? scanState.extracted[r.field] : "NOT DETECTED"}</span>
+          <span class="text-[10px] font-bold text-slate-400 shrink-0">${r.found ? r.confidence + "%" : "—"}</span>
+        </div>`).join("");
+    }
+
+    // ---- Evaluation ----
+    function effectiveStatus(f) {
+      const o = scanState.overrides[f.code];
+      if (!o || o.action === "confirm") return f.status;
+      if (o.action === "false_positive") return (f.status === "pass" || f.status === "not_applicable") ? f.status : "pass";
+      if (o.action === "dispute") return f.status === "pass" ? "fail" : f.status;
+      return f.status;
+    }
+    function recomputeFinal() {
+      const eff = scanState.findings.map(f => ({ ...f, eff: effectiveStatus(f) }));
+      const applicable = eff.filter(f => f.eff !== "not_applicable");
+      const passed = applicable.filter(f => f.eff === "pass").length;
+      const failed = applicable.filter(f => f.eff === "fail").length;
+      const warnings = applicable.filter(f => f.eff === "warning").length;
+      const score = Math.round(((passed + warnings * 0.5) / Math.max(1, applicable.length)) * 100);
+      const result = failed > 0 ? "non_compliant" : (scanState.confidence < 70 ? "needs_review" : "compliant");
+      return { eff, score, result, passed, failed, warnings };
+    }
+
+    function renderEvaluation() {
+      const fin = recomputeFinal();
+      const badgeCls = fin.result === "compliant" ? "bg-emerald-100 text-emerald-800" : fin.result === "non_compliant" ? "bg-rose-100 text-rose-800" : "bg-amber-100 text-amber-800";
+      const panelsTxt = (scanState.panels || 1) === 2 ? " from both front + back panels (merged)" : " from the single scanned image";
+      document.getElementById("eval-summary").innerHTML = `
+        <div class="flex items-center gap-4">
+          <div class="text-center shrink-0">
+            <div class="text-3xl font-extrabold ${fin.score >= 90 ? "text-emerald-600" : fin.score >= 70 ? "text-amber-600" : "text-rose-600"}">${fin.score}</div>
+            <div class="text-[9px] font-bold text-slate-400 uppercase">Score</div>
+          </div>
+          <div>
+            <span class="inline-block px-2.5 py-1 rounded-full text-[11px] font-bold uppercase ${badgeCls}">${fin.result.replace("_", " ")}</span>
+            <div class="text-[11px] text-slate-500 mt-1.5">${fin.passed} pass · ${fin.failed} fail · ${fin.warnings} warning · OCR conf ${scanState.confidence}%</div>
+          </div>
+        </div>
+        <div class="mt-3 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5">
+          <span class="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white text-[10px] font-bold">✓</span>
+          <span class="text-[11px] font-semibold text-emerald-800">All ${scanState.findings.length} rules verified${panelsTxt}</span>
+        </div>`;
+      document.getElementById("eval-findings").innerHTML = scanState.findings.map(f => `
+        <button onclick="selectRule('${f.code}')" class="w-full flex items-center gap-2 rounded-lg border px-2.5 py-2 text-left transition ${scanState.selectedRule === f.code ? "border-blue-400 bg-blue-50/60" : "border-slate-100 hover:border-blue-300 hover:bg-blue-50/40"}">
+          <span class="h-2 w-2 rounded-full shrink-0 ${dotColor(f.status)}"></span>
+          <span class="text-[10px] font-mono font-bold text-slate-400 w-14 shrink-0">${f.code}</span>
+          <span class="flex-1 text-[11px] font-semibold text-slate-700 truncate">${f.title}</span>
+          <span class="text-[9px] font-bold uppercase ${txtColor(f.status)} shrink-0">${f.status.replace("_", " ")}</span>
+        </button>`).join("");
+    }
+
+    // ---- Evidence viewer ----
+    function selectRule(code) {
+      scanState.selectedRule = code;
+      if (["evaluation", "evidence", "manual"].includes(scanState.stage)) zoomToRegion(code);
+      renderBoxes(currentBoxMode());
+      if (scanState.stage === "evidence") renderEvidencePanel();
+      if (scanState.stage === "evaluation") renderEvaluation();
+    }
+
+    function renderEvidencePanel() {
+      document.getElementById("evidence-select").innerHTML = scanState.findings.map(f => `
+        <button onclick="selectRule('${f.code}')" class="w-full flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left transition ${scanState.selectedRule === f.code ? "border-blue-400 bg-blue-50/60" : "border-slate-100 hover:border-blue-300"}">
+          <span class="h-2 w-2 rounded-full shrink-0 ${dotColor(f.status)}"></span>
+          <span class="text-[10px] font-mono font-bold text-slate-400 w-14 shrink-0">${f.code}</span>
+          <span class="flex-1 text-[11px] font-semibold text-slate-700 truncate">${f.title}</span>
+        </button>`).join("");
+      const f = scanState.findings.find(x => x.code === scanState.selectedRule);
+      const region = f ? scanState.regions.find(r => r.ruleCode === f.code) : null;
+      const detail = document.getElementById("evidence-detail");
+      if (!f) {
+        detail.innerHTML = `<p class="text-xs text-slate-400 text-center py-4">Select a rule to inspect its OCR evidence.</p>`;
+        return;
+      }
+      detail.innerHTML = `
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-xs font-bold text-slate-800">${f.code} · ${f.title}</span>
+          <span class="shrink-0 text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${badgeBg(f.status)}">${f.status.replace("_", " ")}</span>
+        </div>
+        <p class="text-xs text-slate-600 leading-relaxed">${f.detail}</p>
+        <div class="rounded-lg bg-slate-900 text-slate-100 p-2.5 font-mono text-[11px] leading-relaxed">
+          <span class="text-cyan-300 font-bold">OCR EVIDENCE:</span> ${f.evidence}
+        </div>
+        ${region ? `<div class="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-400 font-semibold">
+          <span>Region: ${(region.x * 100).toFixed(0)}%,${(region.y * 100).toFixed(0)}% · ${Math.round(region.w * 100)}×${Math.round(region.h * 100)}%</span>
+          <span>Confidence: ${region.found ? region.confidence + "%" : "n/a"}</span>
+        </div>` : ""}
+        <div class="text-[10px] text-slate-400 italic">Canvas zoomed to the detected region (3.0×).</div>`;
+    }
+
+    // ---- Manual verification ----
+    function renderManual() {
+      const el = document.getElementById("manual-list");
+      if (!el) return;
+      el.innerHTML = scanState.findings.map(f => {
+        const o = scanState.overrides[f.code] || { action: "confirm", note: "" };
+        const eff = effectiveStatus(f);
+        return `
+          <div class="rounded-xl border p-3 ${o.action !== "confirm" ? "border-blue-300 bg-blue-50/50" : "border-slate-100"}">
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-[11px] font-bold text-slate-700">${f.code} · ${f.title}</span>
+              <span class="shrink-0 text-[9px] font-bold uppercase px-2 py-0.5 rounded-full ${badgeBg(eff)}">${eff.replace("_", " ")}${o.action !== "confirm" ? " · insp" : ""}</span>
+            </div>
+            <p class="text-[11px] text-slate-500 mt-1">${f.detail}</p>
+            <div class="flex flex-wrap gap-1.5 mt-2">
+              <button onclick="overrideFinding('${f.code}','confirm')" class="ov-btn ${o.action === "confirm" ? "ov-active" : ""}">&#10003; AI correct</button>
+              ${f.status === "fail" || f.status === "warning" ? `<button onclick="overrideFinding('${f.code}','false_positive')" class="ov-btn ${o.action === "false_positive" ? "ov-active" : ""}">&#8634; False positive</button>` : ""}
+              ${f.status === "pass" ? `<button onclick="overrideFinding('${f.code}','dispute')" class="ov-btn ${o.action === "dispute" ? "ov-active" : ""}">&#9873; Dispute</button>` : ""}
+            </div>
+            <input oninput="overrideNote('${f.code}', this.value)" value="${(o.note || "").replace(/"/g, "&quot;")}" placeholder="Inspector note (optional)…" class="w-full mt-2 text-[11px] px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-blue-400">
+          </div>`;
+      }).join("");
+      const fin = recomputeFinal();
+      document.getElementById("manual-verdict").innerText = fin.result.replace("_", " ").toUpperCase() + " · " + fin.score + "/100";
+    }
+
+    function overrideFinding(code, action) {
+      const cur = scanState.overrides[code];
+      if (cur && cur.action === action) delete scanState.overrides[code];
+      else scanState.overrides[code] = { action, note: (cur && cur.note) || "" };
+      renderManual();
+    }
+    function overrideNote(code, value) {
+      const cur = scanState.overrides[code] || { action: "confirm" };
+      scanState.overrides[code] = { ...cur, note: value };
+    }
+
+    // ---- Final report ----
+    function finalizeReport() {
+      const fin = recomputeFinal();
+      const p = scanState.product;
+      if (!p) return;
+      const id = "REP-" + Math.floor(10000 + Math.random() * 90000);
+      const now = new Date().toISOString();
+      const ovs = Object.entries(scanState.overrides).filter(([k, v]) => v.action !== "confirm");
+      let summary = fin.result === "compliant"
+        ? "All applicable Legal Metrology declarations verified" + (ovs.length ? " with " + ovs.length + " inspector override(s)" : "") + ". Certificate ready for marketplace upload."
+        : fin.result === "non_compliant"
+          ? fin.failed + " violation(s) remain after inspector review. Pack must not ship until reprinted and re-scanned."
+          : "OCR confidence below threshold — manual review documented in this report.";
+      if (ovs.length) summary += " Inspector overrides: " + ovs.map(([k, v]) => k + " → " + v.action.replace("_", " ") + (v.note ? " (" + v.note + ")" : "")).join("; ") + ".";
+
+      const report = {
+        id, productId: p.id, productName: p.name,
+        result: fin.result, score: fin.score,
+        passed: fin.passed, failed: fin.failed, warnings: fin.warnings,
+        createdAt: now, summary,
+        findings: fin.eff.map(f => ({
+          code: f.code, title: f.title, status: f.eff, detail: f.detail,
+          evidence: f.evidence + (scanState.overrides[f.code] && scanState.overrides[f.code].action !== "confirm" ? " [Inspector: " + scanState.overrides[f.code].action.replace("_", " ") + (scanState.overrides[f.code].note ? " — " + scanState.overrides[f.code].note : "") + "]" : "")
+        }))
+      };
+      state.reports.unshift(report);
+      try { localStorage.setItem("lm_standalone_reports", JSON.stringify(state.reports)); } catch (e) {}
+
+      scanState.history.unshift({
+        id, productName: p.name, image: scanState.image,
+        result: fin.result, score: fin.score,
+        passed: fin.passed, failed: fin.failed, warnings: fin.warnings,
+        createdAt: now,
+        time: new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }),
+        summary, overridesCount: ovs.length,
+        extracted: scanState.extracted, regions: scanState.regions, confidence: scanState.confidence,
+        findings: report.findings
+      });
+      saveHistory();
+
+      scanState.lastReportId = id;
+      scanState.farthest = 7;
+      scanState.overrides = JSON.parse(JSON.stringify(scanState.overrides));
+      renderReportPanel();
+      setScanStage("report");
+      renderDashboard();
+      renderReports();
+      renderHistory();
+    }
+
+    function renderReportPanel() {
+      if (!scanState.findings.length) return;
+      const fin = recomputeFinal();
+      const ovs = Object.entries(scanState.overrides).filter(([k, v]) => v.action !== "confirm");
+      const cls = fin.result === "compliant" ? "bg-emerald-50 border-emerald-200 text-emerald-800" : fin.result === "non_compliant" ? "bg-rose-50 border-rose-200 text-rose-800" : "bg-amber-50 border-amber-200 text-amber-800";
+      const banner = document.getElementById("report-banner");
+      banner.className = "rounded-xl p-4 text-center border " + cls;
+      banner.innerHTML = `
+        <div class="text-3xl font-extrabold">${fin.score}<span class="text-sm font-bold opacity-50">/100</span></div>
+        <div class="text-sm font-extrabold uppercase tracking-wide mt-1">${fin.result.replace("_", " ")}</div>
+        <div class="text-[11px] mt-1 opacity-80">${fin.passed} pass · ${fin.failed} fail · ${fin.warnings} warning · ${ovs.length} override(s)</div>`;
+      const panelsN = (scanState.panels || 1) === 2 ? "Front + Back (2 panels)" : "Single image";
+      document.getElementById("report-meta").innerHTML = `
+        <div class="flex justify-between gap-2"><span class="text-slate-400">Report ID</span><span class="font-mono font-bold text-slate-700">${scanState.lastReportId || "—"}</span></div>
+        <div class="flex justify-between gap-2"><span class="text-slate-400">Product</span><span class="font-bold text-slate-700 truncate">${scanState.product ? scanState.product.name : ""}</span></div>
+        <div class="flex justify-between gap-2"><span class="text-slate-400">Panels scanned</span><span class="font-bold text-slate-700">${panelsN}</span></div>
+        <div class="flex justify-between gap-2"><span class="text-slate-400">OCR confidence</span><span class="font-bold text-slate-700">${scanState.confidence}%</span></div>`;
+      document.getElementById("report-overrides").innerHTML = ovs.length
+        ? `<div class="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Inspector overrides applied</div>` + ovs.map(([k, v]) => `<div class="flex justify-between gap-2 text-xs py-1 border-b border-slate-100 last:border-0"><span class="font-mono font-bold text-slate-500 shrink-0">${k}</span><span class="font-semibold text-blue-700 text-right">${v.action.replace("_", " ")}${v.note ? " — " + v.note : ""}</span></div>`).join("")
+        : `<div class="text-[11px] text-slate-400">No inspector overrides — AI verdict stands as-is.</div>`;
+    }
+
+    function downloadFinalReport() {
+      const rep = state.reports.find(r => r.id === scanState.lastReportId) || state.reports[0];
+      if (!rep) return;
+      const txt = [
+        "============================================================",
+        "  SCANSURE — LEGAL METROLOGY COMPLIANCE CERTIFICATE",
+        "============================================================",
+        "Certificate ID : " + rep.id,
+        "Date Issued    : " + new Date(rep.createdAt).toLocaleString("en-IN"),
+        "Product SKU    : " + rep.productName,
+        "Verdict        : " + rep.result.toUpperCase() + " (Score: " + rep.score + "/100)",
+        "Pass/Fail      : " + rep.passed + " Passed / " + rep.failed + " Failed / " + rep.warnings + " Warnings",
+        "",
+        "SUMMARY:",
+        rep.summary,
+        "",
+        "FORENSIC RULE-LEVEL FINDINGS:",
+        "------------------------------------------------------------",
+        ...rep.findings.map(f => `[${f.status.toUpperCase()}] ${f.code} — ${f.title}\n  ${f.detail}\n  Evidence: ${f.evidence}\n`),
+        "------------------------------------------------------------",
+        "Verified under Legal Metrology (Packaged Commodities) Rules 2011",
+        "Generated via ScanSure 8-Stage AI Compliance Pipeline"
+      ].join("\n");
+      const blob = new Blob([txt], { type: "text/plain" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `ScanSure-Report-${rep.id}.txt`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+
+    function newScan() {
+      clearUploadPreview();
+      stopLiveCamera();
+      scanState.extracted = {};
+      scanState.regions = [];
+      scanState.findings = [];
+      scanState.overrides = {};
+      scanState.selectedRule = null;
+      scanState.farthest = 1;
+      scanState.lastReportId = null;
+      scanState.backImage = null;
+      scanState.panels = 1;
+      scanState.canvasSide = "front";
+      const bt = document.getElementById("back-thumb");
+      if (bt) { bt.classList.add("hidden"); bt.classList.remove("flex"); }
+      const br = document.getElementById("back-remove-btn");
+      if (br) br.classList.add("hidden");
+      updateSideToggle();
+      selectScannerProduct();
+      setScanStage("upload");
+      clearBoxes();
+      canvasZoomReset();
+    }
+
+    // ---- Scan history ----
+    function renderHistory() {
+      const el = document.getElementById("scan-history-list");
+      if (!el) return;
+      document.getElementById("history-count").innerText = scanState.history.length;
+      if (!scanState.history.length) {
+        el.innerHTML = `<div class="text-center py-6 text-xs text-slate-400">
+          <p class="font-semibold text-slate-500">No scans in this session yet</p>
+          <p class="mt-1">Complete a scan to build your audit trail.</p>
+        </div>`;
+        return;
+      }
+      el.innerHTML = scanState.history.slice(0, 10).map(h => {
+        const bc = h.result === "compliant" ? "bg-emerald-100 text-emerald-700" : h.result === "non_compliant" ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-700";
+        const sc = h.score >= 90 ? "bg-emerald-100 text-emerald-700" : h.score >= 70 ? "bg-amber-100 text-amber-700" : "bg-rose-100 text-rose-700";
+        return `
+          <div class="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-2.5">
+            <span class="h-9 w-9 rounded-full flex items-center justify-center text-xs font-extrabold shrink-0 ${sc}">${h.score}</span>
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-bold text-slate-800 truncate">${h.productName}</span>
+                <span class="shrink-0 text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full ${bc}">${h.result.replace("_", " ")}</span>
+              </div>
+              <div class="text-[10px] text-slate-400 mt-0.5">${h.id} · ${h.time}${h.overridesCount ? " · " + h.overridesCount + " override(s)" : ""}</div>
+            </div>
+            <button onclick="viewHistoryItem('${h.id}')" class="shrink-0 text-[11px] font-bold text-blue-600 hover:underline">View</button>
+          </div>`;
+      }).join("");
+    }
+
+    function viewHistoryItem(id) {
+      const h = scanState.history.find(x => x.id === id);
+      if (!h) return;
+      scanState.product = state.products.find(p => p.name === h.productName) || state.products[0];
+      scanState.image = h.image || "/images/label-1.jpg";
+      scanState.extracted = h.extracted || {};
+      scanState.regions = h.regions || [];
+      scanState.findings = h.findings || [];
+      scanState.confidence = h.confidence || 90;
+      scanState.overrides = {};
+      scanState.selectedRule = null;
+      scanState.farthest = 7;
+      scanState.lastReportId = h.id;
+      document.getElementById("scan-img").src = scanState.image;
+      clearBoxes();
+      canvasZoomReset();
+      setScanStage("report");
+    }
+
+    // ---------- LIVE CAMERA SCAN ENGINE ----------
+    let cameraStream = null;
+    let cameraStarting = false;
+
+    async function toggleLiveCamera() {
+      if (cameraStream) {
+        stopLiveCamera();
+        return;
+      }
+      if (cameraStarting) return;
+      cameraStarting = true;
+
+      const label = document.getElementById("camera-toggle-label");
+      label.innerText = "Requesting access…";
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: "environment",
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: false
+        });
+        cameraStream = stream;
+
+        const video = document.getElementById("camera-video");
+        video.srcObject = stream;
+        try { await video.play(); } catch(e) {}
+
+        document.getElementById("camera-container").classList.remove("hidden");
+        document.getElementById("camera-controls").classList.remove("hidden");
+        document.getElementById("camera-rec-badge").classList.remove("hidden");
+        document.getElementById("camera-rec-badge").classList.add("flex");
+        document.getElementById("camera-error").classList.add("hidden");
+        document.getElementById("camera-status-text").innerText = "Align label inside frame…";
+        label.innerText = "Stop Camera";
+        document.getElementById("camera-toggle-btn").className = "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-semibold transition";
+      } catch (err) {
+        const errEl = document.getElementById("camera-error");
+        errEl.classList.remove("hidden");
+        document.getElementById("camera-error-msg").innerText =
+          err && err.name === "NotAllowedError"
+            ? "Permission denied. Please allow camera access in your browser and try again."
+            : (err && err.name === "NotFoundError" ? "No camera device was found on this device." : (err && err.message ? err.message : "Camera could not be started."));
+      } finally {
+        cameraStarting = false;
+      }
+    }
+
+    function captureCameraFrame() {
+      const video = document.getElementById("camera-video");
+      if (!video || video.videoWidth === 0) return;
+
+      // Freeze frame into canvas -> JPEG data URL
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
+
+      // Flash effect
+      const flash = document.getElementById("camera-flash");
+      flash.classList.remove("capture-flash");
+      void flash.offsetWidth;
+      flash.classList.add("capture-flash");
+
+      // Set as the label to scan
+      scanState.image = dataUrl;
+      document.getElementById("scan-img").src = dataUrl;
+            document.getElementById("mode-chip").innerText = "MODE: LIVE CAPTURE";
+      showUploadPreview(dataUrl, "Live camera capture", "Captured just now");
+      document.getElementById("camera-status-text").innerText = "Frame captured · Ready to scan";
+
+      const note = document.getElementById("capture-note");
+      note.classList.remove("hidden");
+      setTimeout(() => {
+        document.getElementById("camera-status-text").innerText = "Align label inside frame…";
+      }, 2500);
+    }
+
+    function stopLiveCamera() {
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
+        cameraStream = null;
+      }
+      const video = document.getElementById("camera-video");
+      if (video) video.srcObject = null;
+      document.getElementById("camera-container").classList.add("hidden");
+      document.getElementById("camera-controls").classList.add("hidden");
+      document.getElementById("camera-rec-badge").classList.add("hidden");
+      const label = document.getElementById("camera-toggle-label");
+      label.innerText = "Start Camera";
+      const btn = document.getElementById("camera-toggle-btn");
+      btn.className = "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-700 text-white text-xs font-semibold transition";
+    }
+
+    // ---------- INSPECTION REPORTS ----------
+    function renderReports(filter = "all") {
+      const container = document.getElementById("reports-list-container");
+      if (!container) return;
+
+      const filtered = state.reports.filter(r => filter === 'all' || r.result === filter);
+
+      if (filtered.length === 0) {
+        container.innerHTML = `
+          <div class="bg-white rounded-2xl border border-slate-200 p-8 text-center text-sm text-slate-500">
+            No inspection reports found in this category.
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = filtered.map(r => {
+        const badgeColor = r.result === 'compliant' ? 'bg-emerald-100 text-emerald-800' : (r.result === 'non_compliant' ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800');
+        const formattedDate = new Date(r.createdAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
+        return `
+          <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm hover:shadow-md transition flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <div class="flex items-center gap-2 mb-1">
+                <span class="font-mono text-xs font-bold text-slate-400">${r.id}</span>
+                <span class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${badgeColor}">${r.result.replace('_', ' ')}</span>
+                <span class="text-xs font-bold text-slate-700">${r.score}% Score</span>
+              </div>
+              <h3 class="font-bold text-slate-900 text-base">${r.productName}</h3>
+              <p class="text-xs text-slate-500 mt-1 line-clamp-1">${r.summary}</p>
+              <div class="text-[11px] text-slate-400 mt-2">${formattedDate} · ${r.passed} Pass · ${r.failed} Fail · ${r.warnings} Warning</div>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <button onclick="openReportModal('${r.id}')" class="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs shadow-sm flex items-center gap-1.5">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                View Certificate
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function filterReports(f) {
+      document.querySelectorAll(".report-filter-btn").forEach(btn => {
+        btn.className = "report-filter-btn px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200";
+      });
+      document.getElementById(`rf-${f}`).className = "report-filter-btn px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 text-white";
+      renderReports(f);
+    }
+
+    function openReportModal(reportId) {
+      const rep = state.reports.find(r => r.id === reportId) || state.reports[0];
+      if (!rep) return;
+      state.currentReportForModal = rep;
+
+      document.getElementById("cert-id").innerText = rep.id;
+      document.getElementById("cert-product").innerText = rep.productName;
+      document.getElementById("cert-score").innerText = `${rep.score}/100`;
+      document.getElementById("cert-verdict").innerText = rep.result.toUpperCase().replace('_', ' ');
+      document.getElementById("cert-verdict").className = rep.result === 'compliant' ? 'font-bold text-emerald-600' : (rep.result === 'non_compliant' ? 'font-bold text-rose-600' : 'font-bold text-amber-600');
+      document.getElementById("cert-timestamp").innerText = `Timestamp: ${new Date(rep.createdAt).toLocaleString("en-IN")}`;
+      document.getElementById("cert-summary").innerText = rep.summary;
+      document.getElementById("cert-hash").innerText = "SHA256-" + btoa(rep.id + rep.productName).substring(0, 16);
+
+      const findingsContainer = document.getElementById("cert-findings");
+      findingsContainer.innerHTML = rep.findings.map(f => `
+        <div class="p-2.5 rounded-lg border border-slate-200 bg-white">
+          <div class="flex justify-between font-semibold mb-0.5">
+            <span>${f.code} - ${f.title || f.detail}</span>
+            <span class="uppercase font-bold ${f.status === 'pass' ? 'text-emerald-600' : 'text-rose-600'}">${f.status}</span>
+          </div>
+          <div class="text-[11px] text-slate-500 font-mono">Evidence: ${f.evidence || 'Verified'}</div>
+        </div>
+      `).join('');
+
+      document.getElementById("report-modal").classList.remove("hidden");
+    }
+
+    function closeReportModal() {
+      document.getElementById("report-modal").classList.add("hidden");
+    }
+
+    function downloadReportText() {
+      const r = state.currentReportForModal;
+      if (!r) return;
+
+      const txt = [
+        "============================================================",
+        "  SCANSURE — LEGAL METROLOGY COMPLIANCE CERTIFICATE",
+        "============================================================",
+        `Certificate ID : ${r.id}`,
+        `Date Issued    : ${new Date(r.createdAt).toLocaleString("en-IN")}`,
+        `Product SKU    : ${r.productName}`,
+        `Verdict        : ${r.result.toUpperCase()} (Score: ${r.score}/100)`,
+        `Pass/Fail      : ${r.passed} Passed / ${r.failed} Failed / ${r.warnings} Warnings`,
+        "",
+        "SUMMARY:",
+        r.summary,
+        "",
+        "FORENSIC RULE-LEVEL FINDINGS:",
+        "------------------------------------------------------------",
+        ...r.findings.map(f => `[${f.status.toUpperCase()}] ${f.code} — ${f.detail}\n  Evidence: ${f.evidence || 'N/A'}\n`),
+        "------------------------------------------------------------",
+        "Verified under Legal Metrology (Packaged Commodities) Rules 2011",
+        "Generated via ScanSure Automated Compliance System"
+      ].join("\n");
+
+      const blob = new Blob([txt], { type: "text/plain" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `ScanSure-Report-${r.id}.txt`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    // ---------- COMPLIANCE RULES LIBRARY ----------
+    function renderRules() {
+      const container = document.getElementById("rules-list-container");
+      if (!container) return;
+
+      container.innerHTML = state.rules.map(r => `
+        <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm hover:shadow-md transition">
+          <div class="flex items-start justify-between gap-3">
+            <div class="flex items-center gap-3">
+              <span class="px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 font-mono font-bold text-xs">${r.code}</span>
+              <div>
+                <h3 class="font-bold text-slate-900 text-sm">${r.title}</h3>
+                <span class="text-xs text-slate-400">${r.legalRef} · <span class="capitalize font-medium text-slate-600">${r.category}</span></span>
+              </div>
+            </div>
+            <span class="px-2.5 py-0.5 rounded-full text-xs font-bold uppercase ${r.severity === 'critical' ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800'}">
+              ${r.severity}
+            </span>
+          </div>
+          <p class="text-xs text-slate-600 mt-3 leading-relaxed">${r.description}</p>
+        </div>
+      `).join('');
+    }
+
+    function openAddRuleModal() {
+      const code = prompt("Enter Rule Code (e.g. LM-011):", "LM-011");
+      if (!code) return;
+      const title = prompt("Enter Rule Title:", "E-Commerce MRP Display");
+      if (!title) return;
+      const desc = prompt("Enter Rule Requirement:", "Pre-packaged goods sold on marketplace listings must display unambiguous MRP.");
+      if (!desc) return;
+
+      const newRule = {
+        code: code,
+        title: title,
+        description: desc,
+        legalRef: "Rule 4(2), E-Comm Rules 2021",
+        category: "Pricing",
+        severity: "major",
+        active: true
+      };
+
+      state.rules.push(newRule);
+      localStorage.setItem("lm_standalone_rules", JSON.stringify(state.rules));
+      renderRules();
+    }
+
+    // Initialize on page load
+    window.addEventListener("DOMContentLoaded", initAppState);
+
+    // Release camera hardware when the page is closed/refreshed
+    window.addEventListener("beforeunload", () => {
+      if (typeof stopLiveCamera === "function") stopLiveCamera();
+    });
+  </script>
+</body>
+</html>
