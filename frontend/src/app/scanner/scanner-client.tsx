@@ -37,7 +37,7 @@ const STAGES: { id: Stage; num: number; label: string; mode: string }[] = [
   { id: "evaluation", num: 5, label: "Compliance Eval", mode: "EVALUATION" },
   { id: "evidence", num: 6, label: "Evidence Viewer", mode: "EVIDENCE" },
   { id: "manual", num: 7, label: "Manual Verify", mode: "INSPECTOR" },
-  { id: "report", num: 8, label: "Final Report", mode: "CERTIFIED" },
+  { id: "report", num: 8, label: "Final Report", mode: "REPORT" },
 ];
 
 type Region = {
@@ -63,6 +63,9 @@ type EngineFinding = {
 type ScanData = {
   scanId: string;
   verificationId: string | null;
+  detectedProductName: string | null;
+  detectedCategory: string | null;
+  categoryConfidence: number | null;
   imageUrl: string;
   backImageUrl: string;
   panels: 1 | 2;
@@ -161,6 +164,9 @@ export function ScannerClient() {
   const toast = useToast();
   const [products, setProducts] = useState<Product[]>([]);
   const [productId, setProductId] = useState<string>("");
+  const [detectedProductName, setDetectedProductName] = useState<string | null>(null);
+  const [detectedCategory, setDetectedCategory] = useState<string | null>(null);
+  const [categoryConfidence, setCategoryConfidence] = useState<number | null>(null);
   const [file, setFile] = useState<string | null>(null);
   const [fileMeta, setFileMeta] = useState<{ name: string; size: number } | null>(null);
   const [backFile, setBackFile] = useState<string | null>(null);
@@ -200,7 +206,6 @@ export function ScannerClient() {
       .then((r) => r.json())
       .then((d) => {
         setProducts(d.products ?? []);
-        setProductId((prev) => prev || d.products?.[0]?.id || "");
       })
       .finally(() => {});
     fetch("/api/verifications")
@@ -342,7 +347,7 @@ export function ScannerClient() {
 
   /* ---------- pipeline ---------- */
   const startScan = async () => {
-    if (!selected) return;
+    if (!file) return;
     const panels: 1 | 2 = backFile ? 2 : 1;
     setData(null);
     setOverrides({});
@@ -357,7 +362,7 @@ export function ScannerClient() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        productId: selected.id,
+        productId: selected?.id,
         image: file ?? undefined,
         backImage: backFile ?? undefined,
       }),
@@ -393,8 +398,11 @@ export function ScannerClient() {
     setData({
       scanId: res.scan.id,
       verificationId,
-      imageUrl: res.scan.imageUrl || file || selected.imageUrl || "",
-      backImageUrl: res.scan.backImageUrl || backFile || selected.imageUrl || "",
+      detectedProductName: res.scan.detectedProductName ?? null,
+      detectedCategory: res.scan.detectedCategory ?? null,
+      categoryConfidence: res.scan.categoryConfidence ?? null,
+      imageUrl: res.scan.imageUrl || file || selected?.imageUrl || "",
+      backImageUrl: res.scan.backImageUrl || backFile || selected?.imageUrl || "",
       panels: res.scan.panels ?? panels,
       extracted: v.extracted,
       confidence: v.confidence,
@@ -465,8 +473,7 @@ export function ScannerClient() {
     const score = Math.round(
       ((passed + warnings * 0.5) / Math.max(1, applicable.length)) * 100,
     );
-    const result: ScanData["result"] =
-      data.confidence < 70 ? "needs_review" : failed > 0 ? "non_compliant" : "compliant";
+    const result: ScanData["result"] = data.result;
     return { eff, score, result, passed, failed, warnings };
   }, [data, overrides]);
 
@@ -797,19 +804,21 @@ export function ScannerClient() {
                 <div className="space-y-4">
                   <div>
                     <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-ink-500">
-                      Master product
+                      Master product (optional)
                     </label>
-                    <select
-                      className="w-full rounded-xl border border-ink-200 bg-ink-50 px-3 py-2.5 text-sm font-medium focus:border-brand-500 focus:bg-white focus:outline-none"
-                      value={productId}
-                      onChange={(e) => setProductId(e.target.value)}
-                    >
-                      {products.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name} ({p.netQuantity})
-                        </option>
-                      ))}
-                    </select>
+                   <select
+                    className="w-full rounded-xl border border-ink-200 bg-ink-50 px-3 py-2.5 text-sm font-medium focus:border-brand-500 focus:bg-white focus:outline-none"
+                    value={productId}
+                    onChange={(e) => setProductId(e.target.value)}
+                  >
+                    <option value="">No reference product — identify from label</option>
+
+                    {products.map((p) => (
+                      <option key={p.id} value={p.id}>
+                       {p.name} ({p.netQuantity})
+                      </option>
+                    ))}
+                  </select>
                     {selected && (
                       <div className="mt-2 rounded-lg border border-brand-100 bg-brand-50 p-2.5 text-[11px] leading-relaxed text-brand-900">
                         <strong>Master spec:</strong> Net Qty{" "}
@@ -1028,25 +1037,38 @@ export function ScannerClient() {
               )}
 
               {/* 2 PREVIEW */}
-              {stage === "preview" && selected && (
+              {stage === "preview" && (
                 <div className="space-y-4">
                   <div className="space-y-1.5 rounded-xl border border-ink-100 bg-ink-50 p-3 text-xs text-ink-600">
                     <div className="flex justify-between gap-2">
                       <span className="text-ink-400">Product</span>
                       <span className="truncate text-right font-bold text-ink-800">
-                        {selected.name}
+                        {data?.detectedProductName ?? selected?.name ?? "Product not identified"}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between gap-2">
+                      <span className="text-ink-400">Detected category</span>
+                      <span className="text-right font-bold text-ink-800">
+                        {data?.detectedCategory
+                          ? `${data.detectedCategory} ${
+                              data.categoryConfidence != null
+                                ? `(${data.categoryConfidence}% confidence)`
+                                : ""
+                            }`
+                          : "—"}
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-ink-400">Declared net qty</span>
                       <span className="font-bold text-ink-800">
-                        {selected.netQuantity}
+                        {selected?.netQuantity ?? "—"}
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-ink-400">MRP</span>
                       <span className="font-bold text-ink-800">
-                        {selected.mrp != null
+                        {selected?.mrp != null
                           ? `₹${(selected.mrp / 100).toFixed(2)}`
                           : "—"}
                       </span>
@@ -1054,7 +1076,7 @@ export function ScannerClient() {
                     <div className="flex justify-between gap-2">
                       <span className="text-ink-400">Manufacturer</span>
                       <span className="truncate text-right font-bold text-ink-800">
-                        {selected.manufacturerName}
+                        {selected?.manufacturerName ?? "—"}
                       </span>
                     </div>
                   </div>
@@ -1185,7 +1207,11 @@ export function ScannerClient() {
                   <div className="flex items-center gap-2 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2.5">
                     <Icon d={ICONS.check} className="h-4 w-4 shrink-0 text-emerald-600" strokeWidth={3} />
                     <div className="text-[11px] font-semibold text-emerald-800">
-                      All {data.findings.length} rules verified
+                      {data.result === "compliant"
+                        ? `All ${data.findings.length} applicable rules verified`
+                        : data.result === "non_compliant"
+                          ? `${data.failed} rule${data.failed !== 1 ? "s" : ""} require correction`
+                          : `${data.warnings} rule${data.warnings !== 1 ? "s" : ""} require manual review`}
                       {data.panels === 2
                         ? " from both front + back panels (merged)"
                         : " from the single scanned image"}
@@ -1523,10 +1549,10 @@ export function ScannerClient() {
                       override(s)
                     </div>
                     <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-white/60 px-2.5 py-1 text-[10px] font-bold">
-                      {data.panels === 2
-                        ? "Front + Back · 2 panels merged"
-                        : "Single image · all rules verified"}
-                    </div>
+  {data.panels === 2
+    ? "Front + Back · 2 panels merged"
+    : "Single image · manual review required"}
+</div>
                   </div>
 
                   <p className="rounded-xl border border-ink-100 bg-ink-50 p-3 text-xs leading-relaxed text-ink-600">
@@ -1544,14 +1570,14 @@ export function ScannerClient() {
                       }}
                     >
                       <Icon d={ICONS.reports} className="h-4 w-4" />
-                      View Full Evidence Report &amp; Certificate
+                      View Full Evidence Report
                     </Button>
                     <Button
                       variant="secondary"
                       onClick={() => {
                         const txt = [
                           "============================================================",
-                          "  SCANSURE — LEGAL METROLOGY COMPLIANCE CERTIFICATE",
+                          `  SCANSURE — LEGAL METROLOGY ${final.result === "compliant" ? "COMPLIANCE CERTIFICATE" : "COMPLIANCE REPORT"}`,
                           "============================================================",
                           `Scan ID        : ${data.scanId}`,
                           "Product SKU    : " + (selected?.name ?? ""),

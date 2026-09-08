@@ -11,7 +11,9 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
   const { id } = await ctx.params;
   const [scan] = await db.select().from(scans).where(eq(scans.id, id)).limit(1);
   if (!scan) return NextResponse.json({ error: "Scan not found" }, { status: 404 });
-  const [product] = await db.select().from(products).where(eq(products.id, scan.productId)).limit(1);
+  const [product] = scan.productId
+    ? await db.select().from(products).where(eq(products.id, scan.productId)).limit(1)
+    : [];
 
   const verRows = await db
     .select()
