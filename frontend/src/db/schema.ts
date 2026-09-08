@@ -101,9 +101,14 @@ export const scans = pgTable(
   "scans",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    productId: uuid("product_id")
-      .notNull()
-      .references(() => products.id, { onDelete: "cascade" }),
+    productId: uuid("product_id").references(() => products.id, {
+      onDelete: "set null",
+    }),
+
+    detectedProductName: varchar("detected_product_name", { length: 200 }),
+    detectedCategory: varchar("detected_category", { length: 80 }),
+    categoryConfidence: integer("category_confidence"),
+
     status: varchar("status", { length: 20 }).notNull().default("pending"), // pending | completed
     imageUrl: text("image_url").notNull(),
     extracted: jsonb("extracted").$type<Record<string, string | null>>(),
@@ -128,9 +133,9 @@ export const verifications = pgTable(
     scanId: uuid("scan_id")
       .notNull()
       .references(() => scans.id, { onDelete: "cascade" }),
-    productId: uuid("product_id")
-      .notNull()
-      .references(() => products.id, { onDelete: "cascade" }),
+    productId: uuid("product_id").references(() => products.id, {
+      onDelete: "set null",
+    }),
     result: varchar("result", { length: 20 }).notNull().default("pending"), // compliant | non_compliant | needs_review
     score: integer("score").notNull().default(0), // 0-100
     passed: integer("passed").notNull().default(0),

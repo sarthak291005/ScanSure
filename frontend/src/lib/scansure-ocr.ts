@@ -10,6 +10,12 @@ export type ScanSureOcrResult = {
   text_blocks: ScanSureTextBlock[];
 };
 
+export type ProductIdentification = {
+  productName: string | null;
+  category: string | null;
+  confidence: number;
+};
+
 export type OcrRegion = {
   id: string;
   field: string;
@@ -61,6 +67,64 @@ export async function requestScanSureOcr(dataUrl: string, imageId: string): Prom
     clearTimeout(timeout);
   }
 }
+function identifyProduct(text: string[]): ProductIdentification {
+  const normalized = text
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  const joined = normalized.join(" ");
+
+  const categoryPatterns: Array<{ category: string; pattern: RegExp }> = [
+    {
+      category: "cosmetics",
+      pattern: /\b(shampoo|conditioner|hair\s*care|skin\s*care|skincare|lotion|cream|face\s*wash|cosmetic|deodorant)\b/i,
+    },
+    {
+      category: "dairy",
+      pattern: /\b(milk|curd|dahi|paneer|butter|cheese|ghee)\b/i,
+    },
+    {
+      category: "beverages",
+      pattern: /\b(juice|drink|beverage|water|soda|soft\s*drink)\b/i,
+    },
+    {
+      category: "food",
+      pattern: /\b(rice|atta|flour|almond|oil|spice|spices|pulse|pulses|snack|biscuits|biscuit|namkeen)\b/i,
+    },
+  ];
+
+  const categoryMatch = categoryPatterns.find(({ pattern }) => pattern.test(joined));
+
+  let productName: string | null = null;
+
+  if (categoryMatch?.category === "cosmetics") {
+    const likelyName = normalized.filter(
+      (value) =>
+        !/^\d+(?:[.,]\d+)?\s*(kg|g|mg|ml|l|lt)\b/i.test(value) &&
+        !/^(b1|e)$/i.test(value) &&
+        !/\b(micrograms?|per\s+\d+)\b/i.test(value),
+    );
+
+    productName = likelyName.slice(0, 4).join(" ") || null;
+  } else if (normalized.length > 0) {
+    productName = normalized
+      .filter((value) => !/^\d+(?:[.,]\d+)?\s*(kg|g|mg|ml|l|lt)\b/i.test(value))
+      .slice(0, 3)
+      .join(" ") || null;
+  }
+
+  const confidence = categoryMatch
+    ? categoryMatch.category === "cosmetics"
+      ? 90
+      : 80
+    : 0;
+
+  return {
+    productName,
+    category: categoryMatch?.category ?? null,
+    confidence,
+  };
+}
 
 function firstMatch(text: string, pattern: RegExp) {
   return pattern.test(text) ? text : null;
@@ -100,6 +164,7 @@ export function adaptOcrResults(results: Array<{ result: ScanSureOcrResult; side
   }
 
   const text = Object.values(extracted).filter((value): value is string => Boolean(value));
+  const identification = identifyProduct(text);
   const pick = (key: string, pattern: RegExp) => {
     const match = text.find((value) => firstMatch(value, pattern));
     if (match) extracted[key] = match;
@@ -112,10 +177,27 @@ export function adaptOcrResults(results: Array<{ result: ScanSureOcrResult; side
   pick("countryOfOrigin", /\b(?:country\s*of\s*origin|product\s*of|made\s*in)\b/i);
   pick("mrp", /\bmrp\b|₹|\brs\.?\s*\d/i);
   pick("licence", /\b(?:fssai|licen[cs]e)\b/i);
-  if (text[0]) extracted.brand = text[0];
+  const brandCandidate = text.find(
+    (value) =>
+      /[a-z]/i.test(value) &&
+      !/^\s*(b1|e)\s*$/i.test(value) &&
+      !/^\d+(?:[.,]\d+)?\s*(kg|g|mg|ml|l|lt|pcs|nos|units)\b/i.test(value) &&
+      !/\b(per|micrograms?)\b/i.test(value),
+  );
+
+  if (brandCandidate) {
+    extracted.brand = brandCandidate;
+  }
 
   const confidence = confidences.length
     ? Math.round((confidences.reduce((total, value) => total + value, 0) / confidences.length) * 100)
     : 0;
-  return { extracted, regions, confidence };
+  return {
+    extracted,
+    regions,
+    confidence,
+    identification,
+  };
 }
+
+

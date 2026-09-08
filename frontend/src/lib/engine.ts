@@ -42,25 +42,41 @@ const NET_WEIGHT_PATTERNS = [
 ];
 
 function extractNetWeight(e: Extracted): string | null {
-  // 1. explicit net weight fields first
-  for (const [k, v] of Object.entries(e)) {
-    if (!v) continue;
-    const lk = k.toLowerCase();
-    if (!/(weight|weighting|content|net|wt)/.test(lk)) continue;
-    if (/(brand|product|article|name)/.test(lk)) continue;
-    for (const p of NET_WEIGHT_PATTERNS) {
-      const m = v.match(p);
-      if (m) return `${m[1]} ${m[2]}`.toLowerCase();
-    }
-  }
-  // 2. fall back to any field value that literally starts with a net-qty phrase
-  const prefix =
-    /^net\s*(?:wt|weight|wght|content)\s*[:\-]?\s*([\d.,]+)\s*(kg|mg|ml|lt|litre|liters|g|l|m|mm|cm|sq\.?m|oz|lb|pcs|nos|units)/i;
+  // 1. Explicit net-quantity declarations
+  const explicitPatterns = [
+    /net\s*(?:wt|weight|wght|content|quantity)\s*[:\-]?\s*([\d.,]+)\s*(kg|mg|ml|lt|litre|liters|g|l|oz|lb|pcs|nos|units)\b/i,
+  ];
+
   for (const v of Object.values(e)) {
     if (!v) continue;
-    const m = v.match(prefix);
-    if (m) return `${m[1]} ${m[2]}`.toLowerCase();
+
+    for (const pattern of explicitPatterns) {
+      const match = v.match(pattern);
+      if (match) {
+        return `${match[1]} ${match[2]}`.toLowerCase();
+      }
+    }
   }
+
+  // 2. Standalone package quantity, e.g. "200 ml", "500 g", "1 kg", "10 pcs"
+  // Reject measurements that are clearly part of another statement.
+  const standalonePattern =
+    /^\s*([\d.,]+)\s*(kg|mg|ml|lt|litre|liters|g|l|oz|lb|pcs|nos|units)\s*$/i;
+
+  for (const v of Object.values(e)) {
+    if (!v) continue;
+
+    const value = v.trim();
+
+    // Ignore phrases such as "38 micrograms per 100 ml".
+    if (/\bper\b/i.test(value)) continue;
+
+    const match = value.match(standalonePattern);
+    if (match) {
+      return `${match[1]} ${match[2]}`.toLowerCase();
+    }
+  }
+
   return null;
 }
 
@@ -101,25 +117,42 @@ function hasAddress(text: string | null): boolean {
 const PERISHABLE = ["food", "dairy", "bakery", "beverages", "pharma", "cosmetics", "snacks", "spices", "pulses"];
 
 export async function runVerification(
-  productId: string,
+  productId: string | null,
+  detectedCategory: string | null,
+  hasBackImage: boolean,
   extracted: Extracted,
   confidence: number,
   userId: string | null,
   scanId: string,
 ): Promise<EngineResult> {
-  const [product] = await db.select().from(products).where(eq(products.id, productId)).limit(1);
-  if (!product) throw new Error("Product not found");
+  const [product] = productId
+    ? await db.select().from(products).where(eq(products.id, productId)).limit(1)
+    : [undefined];
+
+  if (productId && !product) {
+    throw new Error("Product not found");
+ }
 
   const allRules = await db.select().from(rules).where(eq(rules.active, true));
 
   const findings: EngineFinding[] = [];
 
+  const category = detectedCategory ?? product?.category ?? null;
+
   const applicable = (r: (typeof allRules)[number]) => {
     if (r.applicableTo === "all") return true;
-    return r.applicableTo.split(",").map((s) => s.trim()).includes(product.category);
+    if (!category) return false;
+
+    return r.applicableTo
+      .split(",")
+      .map((s) => s.trim())
+      .includes(category);
   };
 
-  const declaredNorm = parseDeclared(product.declaredWeight, product.packagingUnit);
+  const declaredNorm = product
+    ? parseDeclared(product.declaredWeight, product.packagingUnit)
+    : null;
+
   const labelNet = extractNetWeight(extracted);
 
   const mk = (code: string, status: CheckStatus, detail: string, evidence: string) =>
@@ -132,24 +165,63 @@ export async function runVerification(
     const r = ruleByCode["LM-001"];
     if (r && applicable(r)) {
       if (!labelNet) {
-        mk(r.code, "fail", "No legible net quantity declaration found on the label.", "OCR did not detect any 'Net Wt / Net Weight / Net Content' field.");
+        mk(
+          r.code,
+          "fail",
+          "No legible net quantity declaration found on the label.",
+          "OCR did not detect a usable net quantity declaration.",
+        );
+      } else if (!product) {
+        mk(
+          r.code,
+          "pass",
+          `Net quantity '${labelNet}' detected on the label. No reference product was selected, so master-data comparison was not performed.`,
+          `Label: '${labelNet}'.`,
+        );
+      } else if (!declaredNorm) {
+        mk(
+          r.code,
+          "warning",
+          `Net quantity '${labelNet}' detected, but the reference product has no usable declared pack size for comparison.`,
+          `Label: '${labelNet}'.`,
+        );
       } else if (labelNet !== declaredNorm) {
-        mk(r.code, "fail", `Label shows net quantity '${labelNet}' but the product master declares '${declaredNorm}'. Declaration mismatch blocks certificate.`, `Label: '${labelNet}' vs declared: '${declaredNorm}'.`);
+        mk(
+          r.code,
+          "fail",
+          `Label shows net quantity '${labelNet}' but the product master declares '${declaredNorm}'. Declaration mismatch blocks certificate.`,
+          `Label: '${labelNet}' vs declared: '${declaredNorm}'.`,
+        );
       } else {
-        mk(r.code, "pass", `Net quantity '${labelNet}' found and matches the declared pack size.`, `Label: '${labelNet}'.`);
+        mk(
+          r.code,
+          "pass",
+          `Net quantity '${labelNet}' found and matches the declared pack size.`,
+          `Label: '${labelNet}'.`,
+        );
       }
     }
   }
 
-  // LM-002 legibility — confidence-driven heuristic
+    // LM-002 legibility
   {
     const r = ruleByCode["LM-002"];
+
     if (r && applicable(r)) {
-      const glyph = Math.round((2 + (confidence / 100) * 2.4) * 10) / 10;
       if (confidence >= 80) {
-        mk(r.code, "pass", `Estimated character height ${glyph} mm — above the 2 mm minimum for this pack class.`, `OCR glyph metrics at 160 dpi: mean height ${glyph} mm; contrast ratio ${(8 + confidence / 20).toFixed(1)}:1.`);
+        mk(
+          r.code,
+          "pass",
+          "Required label text was successfully detected with high OCR readability. Physical print size should still be verified against the applicable minimum.",
+          `Overall OCR confidence: ${confidence}%. Physical character height was not estimated from OCR confidence.`,
+        );
       } else {
-        mk(r.code, "warning", `Print legibility is marginal (est. ${glyph} mm). Verify physical pack against Rule 6(1) minimums.`, `Low contrast detected in 2 of 9 OCR regions.`);
+        mk(
+          r.code,
+          "warning",
+          "OCR readability is insufficient to confidently assess label legibility. Verify the physical print size and contrast against the applicable requirements.",
+          `Overall OCR confidence: ${confidence}%. No physical font-size measurement was inferred.`,
+        );
       }
     }
   }
@@ -160,14 +232,15 @@ export async function runVerification(
     if (r && applicable(r)) {
       const man = findField(extracted, ["manufacturer", "packedby", "mfdby", "importer"]);
       const addr = findField(extracted, ["address"]);
+
       if (man && addr && hasAddress(addr)) {
-        mk(r.code, "pass", "Manufacturer name and full address present with statutory prefix.", `Label: '${man}' — ${addr}`);
+        mk(r.code, "pass", "Manufacturer name and address detected on the scanned label.", `Label: '${man}' — ${addr}`);
       } else if (man && addr && !hasAddress(addr)) {
-        mk(r.code, "fail", "Address field present but missing street/locality or PIN code.", `Label: '${addr}' — no PIN code or city detected.`);
+        mk(r.code, "fail", "Address field was detected but could not be validated as a complete address.", `Label: '${addr}' — address appears incomplete.`);
       } else if (man) {
-        mk(r.code, "fail", "Manufacturer name present but the full address is MISSING from the label.", `OCR located '${man}' but no street address, city or PIN code anywhere on the pack.`);
+        mk(r.code, hasBackImage ? "fail" : "warning", hasBackImage ? "Manufacturer name is present but the required address could not be verified on the scanned panels." : "Manufacturer name detected, but the address may be present on the unscanned back/side panel. Review the complete package.", `OCR located '${man}' but no complete address was detected.`);
       } else {
-        mk(r.code, "fail", "Neither manufacturer name nor address was detected on the label.", "No 'Mfd. by / Pkd. by / Imprd. by' block found.");
+        mk(r.code, hasBackImage ? "fail" : "warning", hasBackImage ? "Manufacturer / packer / importer name and address were not detected on the scanned panels." : "Manufacturer / packer / importer information was not detected on the front image. Scan the back/side panel before deciding compliance.", hasBackImage ? "No manufacturer/address block was detected across the scanned panels." : "Front panel only — additional package panels have not been inspected.");
       }
     }
   }
@@ -178,94 +251,228 @@ export async function runVerification(
     if (r && applicable(r)) {
       const m = findField(extracted, ["mfgdate", "manufactureddate", "dateofpack", "packedon", "mfdon"]);
       const d = parseDate(m);
+
       if (!m || !d) {
-        mk(r.code, "fail", "Date of manufacturing / packing not found or not parseable.", m ? `Label: '${m}' — not in DD-MM-YYYY format.` : "No date-of-manufacture block detected.");
+        mk(r.code, hasBackImage ? "fail" : "warning", hasBackImage ? "Date of manufacturing / packing was not detected on the scanned panels." : "Manufacturing / packing date was not detected on the front image. Scan the back/side panel before deciding compliance.", hasBackImage ? "No manufacturing / packing date was detected across the scanned panels." : "Front panel only — additional package panels have not been inspected.");
       } else {
-        mk(r.code, "pass", "Date of manufacture found in the required format.", `Label: '${m}'.`);
+        mk(r.code, "pass", "Date of manufacture / packing detected and parseable.", `Label: '${m}'.`);
       }
     }
   }
 
   // LM-005 best before (perishable)
+    // LM-005 best before (perishable)
   {
     const r = ruleByCode["LM-005"];
+
     if (r) {
       if (!applicable(r)) {
-        mk(r.code, "not_applicable", `Best-before date is not mandated for category '${product.category}'.`, "Rule applicability check: category exempt.");
+        mk(
+          r.code,
+          "not_applicable",
+          `Best-before / expiry check is not applicable to category '${category ?? "unknown"}' under the current rule configuration.`,
+          "Rule applicability check: category is not covered.",
+        );
       } else {
-        const bb = findField(extracted, ["bestbefore", "expirydate", "expdate", "useby"]);
+        const bb = findField(extracted, [
+          "bestbefore",
+          "expirydate",
+          "expdate",
+          "useby",
+        ]);
         const d = parseDate(bb);
+
         if (!bb || !d) {
-          mk(r.code, "fail", "Best-before / expiry date missing from the label (required for this category).", "No 'Best before / Use by' field detected.");
+          mk(
+            r.code,
+            hasBackImage ? "fail" : "warning",
+            hasBackImage
+              ? "Best-before / expiry date was not detected on the scanned panels."
+              : "Best-before / expiry date was not detected on the front image. Scan the back/side panel before deciding compliance.",
+            hasBackImage
+              ? "No best-before / expiry date was detected across the scanned panels."
+              : "Front panel only — additional package panels have not been inspected.",
+          );
         } else {
-          mk(r.code, "pass", "Best-before date present.", `Label: '${bb}'.`);
+          mk(
+            r.code,
+            "pass",
+            "Best-before / expiry date detected and parseable.",
+            `Label: '${bb}'.`,
+          );
         }
       }
     }
   }
 
+
   // LM-006 country of origin
+    // LM-006 country of origin
   {
     const r = ruleByCode["LM-006"];
+
     if (r && applicable(r)) {
       const coo = findField(extracted, ["countryoforigin", "origin"]);
+
       if (coo) {
-        mk(r.code, "pass", "Country of origin declared.", `Label: '${coo}'.`);
+        mk(
+          r.code,
+          "pass",
+          "Country of origin declaration detected on the scanned label.",
+          `Label: '${coo}'.`,
+        );
+      } else if (!hasBackImage) {
+        mk(
+          r.code,
+          "warning",
+          "Country of origin was not detected on the front image. Scan the back/side panel before deciding compliance.",
+          "Front panel only — additional package panels have not been inspected.",
+        );
+      } else if (product?.countryOfOrigin) {
+        mk(
+          r.code,
+          "warning",
+          "Country of origin is present in the product master but was not detected on the scanned panels. Verify the physical label.",
+          `Product master: '${product.countryOfOrigin}' — label declaration not detected.`,
+        );
       } else {
-        mk(r.code, product.countryOfOrigin === "India" ? "warning" : "fail",
-          product.countryOfOrigin === "India"
-            ? "No explicit country-of-origin text detected (recommended for domestic goods, mandatory for imports)."
-            : "Country of origin is MANDATORY for this imported product and is missing.",
-          "No 'Product of / Country of Origin' text detected.");
+        mk(
+          r.code,
+          "warning",
+          "Country of origin was not detected on the scanned panels. Manual verification is required before making a compliance decision.",
+          "No country-of-origin declaration was detected and no reference product was available to establish origin.",
+        );
       }
     }
   }
 
   // LM-007 MRP
+    // LM-007 MRP
   {
     const r = ruleByCode["LM-007"];
+
     if (r && applicable(r)) {
       const mrp = findField(extracted, ["mrp", "price"]);
-      if (!mrp) {
-        mk(r.code, "warning", "No MRP declaration detected on the label.", "No 'MRP' text found.");
-      } else if (!/tax|incl/i.test(mrp)) {
-        mk(r.code, "warning", "MRP present but printed without the 'incl. of all taxes' note.", `Label: '${mrp}' — tax-inclusive wording absent (recommended, not blocking).`);
+
+      if (mrp) {
+        mk(
+          r.code,
+          "pass",
+          "MRP / price declaration detected on the scanned label.",
+          `Label: '${mrp}'.`,
+        );
+      } else if (!hasBackImage) {
+        mk(
+          r.code,
+          "warning",
+          "MRP / price declaration was not detected on the front image. Scan the back/side panel before deciding compliance.",
+          "Front panel only — additional package panels have not been inspected.",
+        );
       } else {
-        mk(r.code, "pass", "MRP with tax-inclusive note present.", `Label: '${mrp}'.`);
+        mk(
+          r.code,
+          "warning",
+          "MRP / price declaration was not detected on the scanned panels. Manual verification is required before making a compliance decision.",
+          "No MRP / price declaration was detected across the scanned panels.",
+        );
       }
     }
   }
 
   // LM-008 licence
+    // LM-008 licence
   {
     const r = ruleByCode["LM-008"];
-    if (r) {
-      if (!applicable(r)) {
-        mk(r.code, "not_applicable", `No statutory licence required for category '${product.category}' under this rule set.`, "Rule applicability check: category not covered.");
-      } else {
-        const lic = findField(extracted, ["licence", "license", "fssaileg", "fssaiceg"]);
-        if (lic && /\d{10,14}/.test(lic)) {
-          mk(r.code, "pass", "FSSAI / statutory licence number present and in valid format.", `Label: '${lic}'.`);
-        } else if (lic && /[\d*?]{2,}/.test(lic.replace(/\d/g, ""))) {
-          mk(r.code, "warning", "Licence number partially legible — re-capture recommended.", `Label region occluded: '${lic}'.`);
-        } else if (lic) {
-          mk(r.code, "fail", "Licence field present but no valid 10–14 digit number detected.", `Label: '${lic}'.`);
+
+    if (r && applicable(r)) {
+      const lic = findField(extracted, [
+        "licence",
+        "license",
+        "fssaileg",
+        "fssaiceg",
+      ]);
+
+      const isFoodCategory = ["food", "dairy", "bakery", "beverages", "snacks", "spices", "pulses"].includes(
+        category ?? "",
+      );
+
+      if (lic) {
+        if (isFoodCategory && /\d{10,14}/.test(lic)) {
+          mk(
+            r.code,
+            "pass",
+            "Food-related statutory licence number detected on the scanned label.",
+            `Label: '${lic}'.`,
+          );
+        } else if (/\d{10,14}/.test(lic)) {
+          mk(
+            r.code,
+            "pass",
+            "Statutory licence / registration number detected on the scanned label.",
+            `Label: '${lic}'.`,
+          );
         } else {
-          mk(r.code, "fail", "FSSAI / statutory licence number missing (required for this category).", "No licence number block detected.");
+          mk(
+            r.code,
+            "warning",
+            "A licence / registration field was detected, but its number could not be confidently validated.",
+            `Label: '${lic}'.`,
+          );
         }
+      } else if (!hasBackImage) {
+        mk(
+          r.code,
+          "warning",
+          isFoodCategory
+            ? "Food-related licence information was not detected on the front image. Scan the back/side panel before deciding compliance."
+            : "Statutory licence information was not detected on the front image. Scan the back/side panel before deciding compliance.",
+          "Front panel only — additional package panels have not been inspected.",
+        );
+      } else {
+        mk(
+          r.code,
+          "warning",
+          isFoodCategory
+            ? "Food-related licence information was not detected on the scanned panels. Manual verification is required."
+            : "Statutory licence information was not detected on the scanned panels. Manual verification is required.",
+          "No licence / registration number was detected across the scanned panels.",
+        );
       }
     }
   }
 
-  // LM-009 product identification
+    // LM-009 product identification
   {
     const r = ruleByCode["LM-009"];
+
     if (r && applicable(r)) {
-      const brand = findField(extracted, ["brand", "product", "article"]);
-      if (brand) {
-        mk(r.code, "pass", "Product identification clear on the pack.", `Label: '${brand}'.`);
+      const productName = findField(extracted, [
+        "product",
+        "article",
+        "brand",
+      ]);
+
+      if (productName && productName.trim().length >= 3) {
+        mk(
+          r.code,
+          "pass",
+          "Product identification text detected on the scanned label.",
+          `Label: '${productName}'.`,
+        );
+      } else if (!hasBackImage) {
+        mk(
+          r.code,
+          "warning",
+          "A clear product identification was not detected on the front image. Scan the back/side panel before deciding compliance.",
+          "Front panel only — additional package panels have not been inspected.",
+        );
       } else {
-        mk(r.code, "fail", "No product identification text detected.", "Brand / article name not found by OCR.");
+        mk(
+          r.code,
+          "warning",
+          "A clear product identification was not detected on the scanned panels. Manual verification is required.",
+          "No reliable product/article identification was detected across the scanned panels.",
+        );
       }
     }
   }
@@ -300,20 +507,33 @@ export async function runVerification(
   const warnings = findings.filter((f) => f.status === "warning").length;
   const score = Math.round(((passed + warnings * 0.5) / Math.max(1, applicableCount)) * 100);
 
-  const belowThreshold = confidence < 70;
-  // Low OCR confidence is evidence uncertainty, not proof of a legal breach.
-  // Preserve the findings for a reviewer, but never turn an uncertain read
-  // into an automatic non-compliance verdict.
-  const result: EngineResult["result"] = belowThreshold ? "needs_review" : failed > 0 ? "non_compliant" : "compliant";
+    const belowThreshold = confidence < 70;
+
+  // OCR uncertainty or unresolved warnings require human verification.
+  // A warning must never be treated as proof of compliance.
+  const result: EngineResult["result"] =
+    belowThreshold
+      ? "needs_review"
+      : failed > 0
+        ? "non_compliant"
+        : warnings > 0
+          ? "needs_review"
+          : "compliant";
 
   let summary: string;
+
   if (belowThreshold) {
-    summary = `OCR confidence (${confidence}%) is below the 70% verification threshold. Findings are provisional; manually review the physical label before any compliance decision.`;
+    summary = `OCR confidence (${confidence}%) is below the 70% verification threshold. Findings are provisional; manually review the physical label before making a compliance decision.`;
   } else if (failed > 0) {
-    const fails = findings.filter((f) => f.status === "fail").map((f) => f.ruleCode);
-    summary = `${failed} rule violation${failed > 1 ? "s" : ""} detected (${fails.join(", ")}). ${warnings} additional warning${warnings !== 1 ? "s" : ""}. The pack must not be dispatched to marketplace fulfilment centres until reprinted and re-scanned.`;
+    const fails = findings
+      .filter((f) => f.status === "fail")
+      .map((f) => f.ruleCode);
+
+    summary = `${failed} confirmed rule issue${failed > 1 ? "s" : ""} detected (${fails.join(", ")}). ${warnings} additional finding${warnings !== 1 ? "s" : ""} require review.`;
+  } else if (warnings > 0) {
+    summary = `${warnings} finding${warnings > 1 ? "s" : ""} require manual verification. The available label evidence is insufficient to issue a final compliance decision.`;
   } else {
-    summary = `All ${passed} applicable Legal Metrology declarations verified on the label with OCR confidence ${confidence}%. Evidence pack complete — compliance certificate is ready for marketplace upload and statutory inspection.`;
+    summary = `All ${passed} applicable checks passed with OCR confidence ${confidence}%.`;
   }
 
   return { extracted, confidence, findings, result, score, passed, failed, warnings, summary, belowThreshold };
@@ -321,7 +541,7 @@ export async function runVerification(
 
 export async function persistVerification(
   scanId: string,
-  productId: string,
+  productId: string | null,
   userId: string | null,
   res: EngineResult,
 ) {
@@ -361,3 +581,4 @@ export async function markScanCompleted(scanId: string, extracted: Extracted, co
     .set({ status: "completed", extracted, confidence })
     .where(and(eq(scans.id, scanId)));
 }
+
